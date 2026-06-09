@@ -1,0 +1,11 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "watchPatterns": ["visual-api/**"]
+  },
+  "deploy": {
+    "startCommand": "bun run start",
+    "healthcheckPath": "/health"
+  }
+}
