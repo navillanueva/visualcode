@@ -19,3 +19,14 @@ export type {
 
 export { createProviders } from "./factory"
 export type { ProviderSet, ProvidersResult } from "./factory"
+
+export { createKickbackClient, parseServedAd, parseEarnings } from "./client"
+export type {
+  KickbackClient,
+  KickbackClientOptions,
+  ServedAd,
+  ServeAdResult,
+  ReportImpressionsResult,
+  Earnings,
+  EarningsResult,
+} from "./client"

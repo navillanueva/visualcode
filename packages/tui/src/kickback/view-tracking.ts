@@ -29,6 +29,13 @@ export interface ViewTrackingOptions {
   intervalMs?: number
   /** Override the timers (tests inject a fake clock). */
   timers?: ViewTrackingTimers
+  /**
+   * Called after each counted impression, with the ad's id (so the wiring layer can
+   * batch + report to the backend). No-op when omitted — the offline mock path never
+   * sets this, so unconfigured behavior is unchanged. Errors thrown here are ignored
+   * (display-only tracking must never break on a reporting failure).
+   */
+  onImpression?: (adId: string) => void
 }
 
 const defaultTimers: ViewTrackingTimers = {
@@ -39,14 +46,32 @@ const defaultTimers: ViewTrackingTimers = {
 /**
  * Start counting impressions into `store`. Returns a stop function that clears the
  * interval; calling it more than once is safe.
+ *
+ * When `onImpression` is supplied it fires once per *counted* impression with the
+ * served ad's id — the store no-ops impressions when consent is off or the slot is
+ * empty, so we only report when the count actually advanced.
  */
 export function startViewTracking(
-  store: Pick<AdStore, "recordImpression">,
+  store: Pick<AdStore, "recordImpression" | "getState">,
   options: ViewTrackingOptions = {},
 ): () => void {
   const intervalMs = options.intervalMs ?? IMPRESSION_INTERVAL_MS
   const timers = options.timers ?? defaultTimers
-  const handle = timers.setInterval(() => store.recordImpression(), intervalMs)
+  const onImpression = options.onImpression
+
+  function tick() {
+    const before = store.getState().impressions
+    store.recordImpression()
+    if (!onImpression) return
+    const after = store.getState()
+    // Only report when an impression actually counted (count advanced + an ad is set).
+    if (after.impressions <= before || !after.ad) return
+    try {
+      onImpression(after.ad.id)
+    } catch {}
+  }
+
+  const handle = timers.setInterval(tick, intervalMs)
 
   let stopped = false
   return () => {

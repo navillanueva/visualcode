@@ -164,3 +164,30 @@ export const SAMPLE_AD: Ad = {
  * slot is non-empty offline.
  */
 export const adStore: AdStore = createAdStore({ enabled: true, ad: SAMPLE_AD })
+
+/**
+ * Backend-served ad shape (subset of @kickback-ai/providers' `ServedAd`). The
+ * backend owns the auction economics, so a served ad carries no local bid — earnings
+ * come from the backend's `/me/earnings`, not the local `developerEarnings` math.
+ */
+export interface ServedAdInput {
+  id: string
+  advertiser: string
+  text: string
+  url: string
+}
+
+/**
+ * Map a backend-served ad into the local `Ad` shape. `blockBidBaseUnits` is 0 because
+ * the backend is the source of truth for earnings when configured — the local
+ * derivation is only meaningful in the offline mock path (SAMPLE_AD has a real bid).
+ */
+export function adFromServed(served: ServedAdInput): Ad {
+  return {
+    id: served.id,
+    advertiser: served.advertiser,
+    text: served.text,
+    url: served.url,
+    blockBidBaseUnits: 0n,
+  }
+}

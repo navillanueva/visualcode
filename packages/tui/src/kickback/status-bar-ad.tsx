@@ -3,6 +3,7 @@ import open from "open"
 import { useTheme } from "../context/theme"
 import { adStore, type AdState } from "./ad-store"
 import { startViewTracking } from "./view-tracking"
+import { reportImpression } from "./backend"
 
 // Kickback AI — live status-bar ad renderer.
 //
@@ -23,7 +24,7 @@ export function StatusBarAd() {
 
   onMount(() => {
     const unsubscribe = adStore.subscribe(setState)
-    const stop = startViewTracking(adStore)
+    const stop = startViewTracking(adStore, { onImpression: reportImpression })
     onCleanup(() => {
       unsubscribe()
       stop()

@@ -41,6 +41,8 @@ import { useConnected } from "./component/use-connected"
 import { DialogMcp } from "./component/dialog-mcp"
 import { DialogStatus } from "./component/dialog-status"
 import { DialogMe } from "./component/dialog-me"
+import { DialogWallet } from "./component/dialog-wallet"
+import * as KickbackBackend from "./kickback/backend"
 import { DialogThemeList } from "./component/dialog-theme-list"
 import { DialogHelp } from "./ui/dialog-help"
 import { DialogAgent } from "./component/dialog-agent"
@@ -464,6 +466,10 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
   const args = useArgs()
   onMount(() => {
+    // Kickback: swap the ad source to the backend-served ad when a Visual Code
+    // connection is configured (via `/wallet`); otherwise keeps SAMPLE_AD. Never
+    // throws — degrades silently to the local mock when unconfigured.
+    void KickbackBackend.init()
     batch(() => {
       if (args.agent) local.agent.set(args.agent)
       if (args.model) {
@@ -762,6 +768,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         slashName: "me",
         run: () => {
           dialog.replace(() => <DialogMe />)
+        },
+        category: "System",
+      },
+      {
+        name: "kickback.wallet",
+        title: "Connect Visual Code wallet",
+        slashName: "wallet",
+        run: () => {
+          dialog.replace(() => <DialogWallet />)
         },
         category: "System",
       },

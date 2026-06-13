@@ -7,7 +7,7 @@
 // the mock providers never touch the network (see CLAUDE.md golden rules #4, #5).
 
 import { createMockPrivacyProvider, MOCK_USDC } from "@kickback-ai/providers/mock"
-import { fromBaseUnits, type PrivacyProvider } from "@kickback-ai/providers"
+import { fromBaseUnits, type PrivacyProvider, type Earnings, type KickbackClient } from "@kickback-ai/providers"
 import type { AdState } from "./ad-store"
 
 /** Fully-formatted snapshot for the `/me` view. Strings are render-ready. */
@@ -25,6 +25,10 @@ export interface RevenueView {
   earningsUsdc: string
   /** Settled private balance held in the (mock) Unlink account, formatted USDC. */
   privateBalanceUsdc: string
+  /** Where the earnings figures came from — drives the provenance line in `/me`. */
+  source: "backend" | "mock"
+  /** Developer's settlement wallet address (backend only); empty in the mock path. */
+  walletAddress: string
 }
 
 /**
@@ -43,7 +47,37 @@ export function buildRevenueView(state: AdState, privateBalanceBaseUnits: bigint
     clicks: state.clicks,
     earningsUsdc: fromBaseUnits(state.developerEarningsBaseUnits),
     privateBalanceUsdc: fromBaseUnits(privateBalanceBaseUnits),
+    source: "mock",
+    walletAddress: "",
   }
+}
+
+/**
+ * Overlay backend earnings onto a mock-derived view. The served ad still comes from
+ * the ad-store (display), but the money + counters become the backend's source of
+ * truth: balance, impressions, clicks, and the settlement wallet address. The mock
+ * `privateBalanceUsdc` is dropped (the backend balance is authoritative).
+ */
+export function withBackendEarnings(view: RevenueView, earnings: Earnings): RevenueView {
+  return {
+    ...view,
+    impressions: earnings.impressions,
+    clicks: earnings.clicks,
+    earningsUsdc: fromBaseUnits(earnings.balanceBaseUnits),
+    privateBalanceUsdc: fromBaseUnits(earnings.balanceBaseUnits),
+    source: "backend",
+    walletAddress: earnings.walletAddress,
+  }
+}
+
+/**
+ * Fetch backend earnings when a client is configured, returning undefined on any
+ * unavailable result so the caller keeps the mock-derived view. Never throws.
+ */
+export async function fetchBackendEarnings(client: KickbackClient | undefined): Promise<Earnings | undefined> {
+  if (!client) return undefined
+  const result = await client.getEarnings()
+  return result.ok ? result.earnings : undefined
 }
 
 /**
