@@ -76,19 +76,30 @@ export function createApp(deps: AppDeps) {
     }),
   )
 
-  function setSessionCookie(c: Context, accountId: string) {
-    setCookie(c, SESSION_COOKIE, signSession(accountId, deps.tokenSigningSecret), {
+  function setSessionCookie(c: Context, accountId: string): string {
+    const token = signSession(accountId, deps.tokenSigningSecret)
+    // SameSite=None so the cookie can ride cross-site fetches from the web app
+    // (web and api are different *.up.railway.app hosts); requires Secure, set in
+    // prod. The token is also RETURNED so the SPA can send it as a Bearer header —
+    // that's the primary path, since cross-site cookies are increasingly blocked.
+    setCookie(c, SESSION_COOKIE, token, {
       httpOnly: true,
-      sameSite: "Lax",
+      sameSite: "None",
       secure: deps.secureCookies,
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     })
+    return token
   }
 
   // Per-route auth middleware (see header note on why this isn't a sub-app `use`).
   const sessionAuth = createMiddleware<Vars>(async (c, next) => {
-    const accountId = verifySession(getCookie(c, SESSION_COOKIE), deps.tokenSigningSecret)
+    // Accept the signed session token from the Authorization header (primary,
+    // cross-site safe) or the cookie (same-origin / dev). Try both.
+    const bearer = /^Bearer\s+(.+)$/.exec(c.req.header("Authorization") ?? "")?.[1]?.trim()
+    const accountId =
+      verifySession(bearer, deps.tokenSigningSecret) ??
+      verifySession(getCookie(c, SESSION_COOKIE), deps.tokenSigningSecret)
     if (!accountId || !(await repo.getAccountById(deps.db, accountId))) {
       return c.json({ ok: false, error: "unauthorized" }, 401)
     }
@@ -120,8 +131,8 @@ export function createApp(deps: AppDeps) {
       return c.json({ ok: false, error: `invalid Dynamic JWT: ${errMsg(e)}` }, 401)
     }
     const account = await repo.upsertAccountByAddress(deps.db, { address: identity.address, email: identity.email })
-    setSessionCookie(c, account.id)
-    return c.json({ address: account.address, ok: true })
+    const session = setSessionCookie(c, account.id)
+    return c.json({ address: account.address, ok: true, session })
   })
 
   // CONTRACT: POST /api/auth/import { privateKey } → { address, ok } (custodial fallback)
@@ -139,8 +150,8 @@ export function createApp(deps: AppDeps) {
     }
     const enc = encryptSecret(privateKey, deps.tokenSigningSecret)
     const account = await repo.upsertAccountByAddress(deps.db, { address, encPrivateKey: enc })
-    setSessionCookie(c, account.id)
-    return c.json({ address: account.address, ok: true })
+    const session = setSessionCookie(c, account.id)
+    return c.json({ address: account.address, ok: true, session })
   })
 
   // ── Web routes (session cookie) ────────────────────────────────────────────

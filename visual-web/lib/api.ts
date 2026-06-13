@@ -31,6 +31,28 @@ export interface Me {
 export interface AuthResult {
   address: string
   ok: boolean
+  /** Signed session token — sent back as `Authorization: Bearer` on later calls. */
+  session?: string
+}
+
+// Web and API live on different hosts, so a cross-site session cookie can't be
+// relied on (SameSite/3p-cookie blocking). The auth endpoints return a signed
+// session token; we persist it and send it as a Bearer header on every request.
+const SESSION_KEY = "vc_session"
+let sessionToken: string | null = null
+
+function loadSession(): string | null {
+  if (sessionToken) return sessionToken
+  if (typeof localStorage !== "undefined") sessionToken = localStorage.getItem(SESSION_KEY)
+  return sessionToken
+}
+
+/** Persist (or clear) the session token used to authenticate web routes. */
+export function setSession(token: string | null): void {
+  sessionToken = token
+  if (typeof localStorage === "undefined") return
+  if (token) localStorage.setItem(SESSION_KEY, token)
+  else localStorage.removeItem(SESSION_KEY)
 }
 
 export class ApiError extends Error {
@@ -47,11 +69,13 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
   try {
+    const token = loadSession()
     res = await fetch(`${BASE_URL}${path}`, {
       ...init,
       credentials: "include",
       headers: {
         "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(init?.headers ?? {}),
       },
     })
@@ -75,19 +99,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // --- Auth -----------------------------------------------------------------
 
 /** Primary (non-custodial): verify the Dynamic JWT, link the account to its wallet. */
-export function authDynamic(dynamicJwt: string): Promise<AuthResult> {
-  return request<AuthResult>("/api/auth/dynamic", {
+export async function authDynamic(dynamicJwt: string): Promise<AuthResult> {
+  const res = await request<AuthResult>("/api/auth/dynamic", {
     method: "POST",
     body: JSON.stringify({ dynamicJwt }),
   })
+  if (res.session) setSession(res.session)
+  return res
 }
 
 /** Fallback (custodial): import a raw private key; the backend stores it encrypted. */
-export function authImport(privateKey: string): Promise<AuthResult> {
-  return request<AuthResult>("/api/auth/import", {
+export async function authImport(privateKey: string): Promise<AuthResult> {
+  const res = await request<AuthResult>("/api/auth/import", {
     method: "POST",
     body: JSON.stringify({ privateKey }),
   })
+  if (res.session) setSession(res.session)
+  return res
 }
 
 // --- Account / device token ----------------------------------------------

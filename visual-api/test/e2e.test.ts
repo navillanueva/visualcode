@@ -78,6 +78,22 @@ describe("full money loop (mock providers)", () => {
     deviceToken = body.token
   })
 
+  test("session token authenticates web routes via Authorization (no cookie)", async () => {
+    // The deployed web app is a different host than the API, so it can't rely on a
+    // cross-site cookie — it sends the returned session token as a Bearer header.
+    const jwt = await h.signDynamicJwt({ sub: "dev-2", address: "0x" + "c".repeat(40) })
+    const auth = await h.app.request("/api/auth/dynamic", jsonInit("POST", { dynamicJwt: jwt }))
+    const { session } = (await auth.json()) as { session?: string }
+    expect(session).toBeTruthy()
+
+    const res = await h.app.request(
+      "/api/device-tokens",
+      jsonInit("POST", {}, { Authorization: `Bearer ${session}` }),
+    )
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { token: string }).token).toMatch(/^vc_dt_/)
+  })
+
   test("TUI serves the funded campaign as the auction winner", async () => {
     const res = await h.app.request("/api/ad/serve", { headers: { Authorization: `Bearer ${deviceToken}` } })
     expect(res.status).toBe(200)
