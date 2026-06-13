@@ -56,6 +56,7 @@ import { useTuiConfig } from "../../config"
 import { usePromptWorkspace } from "./workspace"
 import { usePromptMove } from "./move"
 import { readLocalAttachment } from "./local-attachment"
+import { StatusBarAd } from "../../kickback/status-bar-ad"
 
 export type PromptProps = {
   sessionID?: string
@@ -1571,6 +1572,12 @@ export function Prompt(props: PromptProps) {
                         </Show>
                       )
                     })()}
+                    {/* Kickback AI — replace the working title with the auction ad while
+                        busy (display-only, never enters the LLM context). Renders nothing
+                        when consent is off or no ad, falling back to the normal title. */}
+                    <Show when={status().type !== "retry"}>
+                      <StatusBarAd />
+                    </Show>
                   </box>
                 </box>
                 <text fg={store.interrupt > 0 ? theme.primary : theme.text}>
