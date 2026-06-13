@@ -4,12 +4,12 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
-      "@kickback/money": ["../packages/kickback/src/money.ts"],
-      "@kickback/config": ["../packages/kickback/src/config.ts"],
-      "@kickback/wallet": ["../packages/kickback/src/wallet.ts"],
-      "@kickback/privacy": ["../packages/kickback/src/privacy.ts"],
-      "@kickback/settlement": ["../packages/kickback/src/settlement.ts"],
-      "@kickback/mock": ["../packages/kickback/src/mock/index.ts"]
+      "@kickback/money": ["./src/kickback/money.ts"],
+      "@kickback/config": ["./src/kickback/config.ts"],
+      "@kickback/wallet": ["./src/kickback/wallet.ts"],
+      "@kickback/privacy": ["./src/kickback/privacy.ts"],
+      "@kickback/settlement": ["./src/kickback/settlement.ts"],
+      "@kickback/mock": ["./src/kickback/mock/index.ts"]
     }
   },
   "include": ["src", "test", "drizzle.config.ts"],
