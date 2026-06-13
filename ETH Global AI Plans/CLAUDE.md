@@ -91,3 +91,41 @@ Scoped 2026-06-13. Build by hand tomorrow — the loop must not scaffold or depl
 Update `PROGRESS.md`: (a) what runs, (b) `TODO(human)` markers grouped by service, (c) open booth
 questions (Unlink track framing: OSS-integration vs Overall Privacy App; confirm Arc USDC ERC-20
 address), (d) the single next command to resume.
+
+## POST-MVP — FUTURE DIRECTION (targeted private advertising)
+
+*Captured 2026-06-13 (post-MVP vision; NOT in MVP/v0.4 scope). The v0.4 settlement architecture lives
+in `plans/plan-4-private-custodial-settlement.md` — custodial pooled model, Postgres ledger does the
+50/50 split off-chain, real private Unlink deposit (at fund) + withdraw (at payout), no per-impression
+on-chain.*
+
+- **MVP today:** the ad is served to a *random* developer — the auction winner is shown to whoever is
+  running the TUI. No targeting.
+- **The vision — targeted advertising.** Advertisers buy ad inventory aimed at a developer *segment*,
+  not the whole pool: e.g. a React / frontend-tooling company pays to reach **front-end developers**; a
+  database vendor targets **backend** devs; a security vendor targets devs touching auth/crypto.
+  Targeting signals come from the TUI session (language / framework / repo / file types the dev is
+  working in) and stay **off-chain** — never in the LLM context, never on-chain.
+- **Why privacy is the moat (the whole reason Unlink is here).** With targeting, *who an advertiser
+  pays* is commercially sensitive. A transparent chain would leak (a) the advertiser's go-to-market:
+  which segments they buy and how much they spend, and (b) the developer's stack/affiliations: which
+  advertisers a dev earns from. Unlink's shielded pool hides the **advertiser↔developer pairing** (plus
+  amounts/graph): an observer can see "an advertiser funded the platform" and "a developer was paid by
+  the platform" but **cannot link the two**. So advertisers run targeted campaigns without tipping
+  competitors, and developers earn without doxxing their stack. **Both counterparties in each ad deal
+  are hidden — that is the product.**
+- **How it composes with v0.4 (no settlement change).** Targeting is purely an **off-chain
+  matching/auction** concern (which dev sees which ad, recorded in the ledger). Money still flows
+  advertiser → treasury → shared Unlink pool → developer; the pool provides unlinkability regardless of
+  how the ad was matched. So targeting is additive — build segment matching on top of the existing
+  auction (`visual-api/src/auction.ts`) + serve (`/api/ad/serve`) without touching the settlement layer.
+- **Open questions for later (not now):**
+  - Targeting signals + **developer consent**: what session context is used to match ads, and how the
+    dev opts in / controls it. Keep all targeting metadata off-chain.
+  - Anti-gaming of segments (a dev faking a segment to attract higher bids).
+  - **Mainnet:** real USDC as the pool token (testnet uses a *project-configured test-USDC* — see the
+    token note in `plans/plan-4-private-custodial-settlement.md` §2 P0a).
+  - **Optional non-custodial variant:** advertisers self-custody (each runs their own private Unlink
+    account paying developers directly, no platform pool). Heavier — per-advertiser keys + gas — but
+    removes platform trust. Different architecture than v0.4's custodial pool; revisit only if custody
+    becomes a concern.
