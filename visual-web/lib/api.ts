@@ -163,6 +163,9 @@ export interface WorldIdProof {
   merkle_root: string
   nullifier_hash: string
   verification_level: string
+  /** The action the proof was generated for. The backend verifies against this exact
+   *  action, so it MUST match the IDKit widget's `action` (else the proof is invalid). */
+  action: string
 }
 
 /** Outcome of POST /api/me/verify-human. `error` is the backend's machine code. */

@@ -10,7 +10,9 @@ import { Check, Shield, WarningTriangle } from "@/components/Icons"
 // app_id is typed `app_${string}` by IDKit; the cast is safe because we only
 // render the widget once a non-empty value is present (see `configured`).
 const APP_ID = process.env.NEXT_PUBLIC_WORLD_ID_APP_ID ?? ""
-const ACTION = process.env.NEXT_PUBLIC_WORLD_ID_ACTION ?? "visualcode-account"
+// Must match the action registered in the World Developer Portal AND the backend's
+// WORLD_ID_ACTION — the proof is bound to (app_id, action), so a mismatch fails verify.
+const ACTION = process.env.NEXT_PUBLIC_WORLD_ID_ACTION ?? "blurbcode-account"
 
 // Maps the backend's machine error codes to copy a human can act on. The 409
 // "already_linked" is the anti-Sybil block (this World ID is bound elsewhere).
@@ -62,6 +64,9 @@ export function VerifyHuman({ copy, onVerified }: { copy: string; onVerified: ()
       merkle_root: result.merkle_root,
       nullifier_hash: result.nullifier_hash,
       verification_level: result.verification_level,
+      // Forward the exact action the proof was generated for, so the backend verifies
+      // against it instead of falling back to its own (which caused the 400).
+      action: ACTION,
     })
     if (!res.ok) {
       const msg = messageFor(res.error)
