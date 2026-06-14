@@ -16,7 +16,7 @@ import { createMiddleware } from "hono/factory"
 import { privateKeyToAccount } from "viem/accounts"
 import type { Database } from "./db/index"
 import * as repo from "./db/repo"
-import { selectWinner } from "./auction"
+import { selectRotating } from "./auction"
 import { allowedImpressionCount, RATE_WINDOW_MS } from "./ratelimit"
 import { computeImpressionCharge } from "./accounting"
 import { toBaseUnits, USDC_DECIMALS } from "@kickback/money"
@@ -86,6 +86,10 @@ export function createApp(deps: AppDeps) {
   // Fixed pricing: every campaign bids $10 per 1,000 views, in the deployment's
   // USDC base units (ARC_USDC_DECIMALS — 6dp mainnet, 18dp arc-testnet pool token).
   const FIXED_BID_BASE_UNITS = toBaseUnits("10", deps.usdcDecimals ?? USDC_DECIMALS)
+  // Round-robin cursor for the ad slot: every served ad advances it so repeated
+  // /api/ad/serve calls rotate through the tied top-bid campaigns (fixed pricing
+  // makes them all tie) instead of always returning the earliest-created one.
+  let serveCursor = 0
   const app = new Hono<Vars>()
 
   app.use(
@@ -364,7 +368,7 @@ export function createApp(deps: AppDeps) {
   // CONTRACT: GET /api/ad/serve → { ad: { id, advertiser, text, url } | null }
   app.get("/api/ad/serve", bearerAuth, async (c) => {
     const candidates = await repo.activeAuctionCandidates(deps.db)
-    return c.json({ ad: selectWinner(candidates) })
+    return c.json({ ad: selectRotating(candidates, serveCursor++) })
   })
 
   // CONTRACT: POST /api/impressions { adId, count } → { ok: true, creditedBaseUnits }

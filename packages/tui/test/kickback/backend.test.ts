@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { KickbackClient } from "@kickback-ai/providers"
 import * as Backend from "../../src/kickback/backend"
+import type { PollingTimers } from "../../src/kickback/backend"
 import { adStore, SAMPLE_AD, adFromServed } from "../../src/kickback/ad-store"
 import { startViewTracking, type ViewTrackingTimers } from "../../src/kickback/view-tracking"
 import { buildRevenueView, fetchBackendEarnings } from "../../src/kickback/revenue"
@@ -90,6 +91,78 @@ describe("backend configured — impression batching", () => {
     await Backend.__flushForTest() // attempt 1 fails, re-buffers
     await Backend.__flushForTest() // attempt 2 retries the re-buffered count
     expect(attempts).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe("backend configured — ad rotation polling", () => {
+  /** Capture the interval callback so the test can drive ticks deterministically. */
+  function captureTimers() {
+    let cb: (() => void) | undefined
+    let started = false
+    const timers: PollingTimers = {
+      setInterval: (callback) => {
+        cb = callback
+        started = true
+        return 1 as unknown as ReturnType<typeof setInterval>
+      },
+      clearInterval: () => {
+        cb = undefined
+      },
+    }
+    return { timers, tick: () => cb?.(), started: () => started }
+  }
+  // Drain the async poll() microtasks scheduled by a tick (real setTimeout, not the
+  // injected interval timers).
+  const flush = () => new Promise<void>((r) => setTimeout(r, 0))
+
+  test("re-polls on each tick and swaps to the rotating ad", async () => {
+    const ads = [
+      { id: "c1", advertiser: "Blurb Code", text: "t1", url: "u1" },
+      { id: "c2", advertiser: "Arc", text: "t2", url: "u2" },
+      { id: "c3", advertiser: "Unlink", text: "t3", url: "u3" },
+    ]
+    let i = 0
+    const { timers, tick } = captureTimers()
+    await Backend.init(
+      async () => fakeClient({ serveAd: async () => ({ ok: true, ad: ads[i++ % ads.length]! }) }),
+      { timers, intervalMs: 9_000 },
+    )
+    // init performed the first swap; ticks cycle the rest.
+    expect(adStore.getState().ad?.id).toBe("c1")
+    tick()
+    await flush()
+    expect(adStore.getState().ad?.id).toBe("c2")
+    tick()
+    await flush()
+    expect(adStore.getState().ad?.id).toBe("c3")
+  })
+
+  test("keeps the current ad on a poll miss (null/unavailable never blanks the slot)", async () => {
+    let calls = 0
+    const { timers, tick } = captureTimers()
+    await Backend.init(
+      async () =>
+        fakeClient({
+          serveAd: async () => {
+            calls++
+            return calls === 1
+              ? { ok: true, ad: { id: "c1", advertiser: "A", text: "t", url: "u" } }
+              : { ok: true, ad: null }
+          },
+        }),
+      { timers },
+    )
+    expect(adStore.getState().ad?.id).toBe("c1")
+    tick()
+    await flush()
+    expect(adStore.getState().ad?.id).toBe("c1")
+  })
+
+  test("unconfigured → no poller is ever started (true no-op offline)", async () => {
+    const { timers, started } = captureTimers()
+    await Backend.init(async () => undefined, { timers })
+    expect(started()).toBe(false)
+    expect(adStore.getState().ad).toEqual(SAMPLE_AD)
   })
 })
 
