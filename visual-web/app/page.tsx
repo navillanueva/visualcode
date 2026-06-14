@@ -2,6 +2,7 @@ import Link from "next/link"
 import { Footer } from "@/components/Footer"
 import { Spinner } from "@/components/Spinner"
 import { ArrowRight, ArrowDownRight, Check, Coin, Lock, Shield } from "@/components/Icons"
+import { InstallCommand } from "@/components/InstallCommand"
 
 // Advertiser names (Linear/Dynamic/etc.) are PLACEHOLDERS — sample copy only.
 // TODO(human): real launch partners.
@@ -56,7 +57,13 @@ export default function Landing() {
             Advertise with us
           </Link>
         </div>
-        <div className="mono" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 22, marginTop: 30, fontSize: 13, color: "var(--g-650)", flexWrap: "wrap" }}>
+        <div style={{ maxWidth: 540, margin: "30px auto 0" }}>
+          <InstallCommand />
+          <div className="mono" style={{ marginTop: 9, fontSize: 11.5, letterSpacing: "0.04em", color: "var(--g-600)", textAlign: "center" }}>
+            macOS · one line · no fork, no clone
+          </div>
+        </div>
+        <div className="mono" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 22, marginTop: 26, fontSize: 13, color: "var(--g-650)", flexWrap: "wrap" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
             <span style={{ color: "var(--earn-text)", display: "inline-flex" }}>
               <Shield />
@@ -192,8 +199,8 @@ export default function Landing() {
               </div>
             ))}
           </div>
-          <div className="mono" style={{ fontSize: 13, background: "var(--term-body)", border: "1px solid var(--term-border)", borderRadius: 10, padding: "14px 16px", color: "var(--g-650)", marginBottom: 22 }}>
-            <span style={{ color: "var(--indigo)" }}>$</span> npm i -g blurbcode <span style={{ color: "var(--term-dim)" }}>&& blurb login</span>
+          <div style={{ marginBottom: 22 }}>
+            <InstallCommand compact />
           </div>
           <Link href="/me" className="btn" style={{ background: "var(--g-100)", color: "var(--g-1000)" }}>
             See earnings <ArrowRight size={17} />

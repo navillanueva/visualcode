@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# BlurbCode installer — https://blurbcode.xyz
+#
+#   curl -fsSL https://blurbcode.xyz/install | bash
+#
+# Downloads the prebuilt BlurbCode binary for your platform from GitHub Releases
+# and puts it on your PATH. No fork, no clone, no build step.
+set -euo pipefail
+
+APP=blurbcode
+BINARY=blurbcode
+REPO=navillanueva/visualcode
+
+MUTED='\033[0;2m'
+RED='\033[0;31m'
+INDIGO='\033[38;5;63m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+BlurbCode Installer
+
+Usage: install [options]
+
+Options:
+    -h, --help              Display this help message
+    -v, --version <version> Install a specific version (e.g., 0.1.0)
+        --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
+
+Examples:
+    curl -fsSL https://blurbcode.xyz/install | bash
+    curl -fsSL https://blurbcode.xyz/install | bash -s -- --version 0.1.0
+EOF
+}
+
+requested_version=${VERSION:-}
+no_modify_path=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        -v|--version)
+            if [[ -n "${2:-}" ]]; then requested_version="$2"; shift 2
+            else echo -e "${RED}Error: --version requires a version argument${NC}"; exit 1; fi ;;
+        --no-modify-path) no_modify_path=true; shift ;;
+        *) echo -e "${MUTED}Warning: Unknown option '$1'${NC}" >&2; shift ;;
+    esac
+done
+
+# --- detect platform ---------------------------------------------------------
+raw_os=$(uname -s)
+case "$raw_os" in
+    Darwin*) os="darwin" ;;
+    Linux*) os="linux" ;;
+    MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+    *) os=$(echo "$raw_os" | tr '[:upper:]' '[:lower:]') ;;
+esac
+
+arch=$(uname -m)
+[[ "$arch" == "aarch64" ]] && arch="arm64"
+[[ "$arch" == "x86_64" ]] && arch="x64"
+
+# An Intel binary running under Rosetta on Apple Silicon should get the arm64 build.
+if [ "$os" = "darwin" ] && [ "$arch" = "x64" ]; then
+    if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)" = "1" ]; then
+        arch="arm64"
+    fi
+fi
+
+target="$os-$arch"
+
+# Platforms we currently publish a prebuilt binary for. macOS Apple Silicon today;
+# Linux/Windows land once the release CI matrix is wired up (see the repo README).
+SUPPORTED="darwin-arm64"
+is_supported=false
+for t in $SUPPORTED; do
+    [ "$t" = "$target" ] && is_supported=true
+done
+if [ "$is_supported" != "true" ]; then
+    echo -e "${RED}No prebuilt BlurbCode binary for ${target} yet.${NC}"
+    echo -e "${MUTED}Prebuilt: ${SUPPORTED}. For other platforms, build from source:${NC}"
+    echo -e "  https://github.com/${REPO}"
+    exit 1
+fi
+
+archive_ext=".zip"
+[ "$os" = "linux" ] && archive_ext=".tar.gz"
+filename="$APP-$target$archive_ext"
+
+if [ "$os" = "linux" ]; then
+    command -v tar >/dev/null 2>&1 || { echo -e "${RED}Error: 'tar' is required.${NC}"; exit 1; }
+else
+    command -v unzip >/dev/null 2>&1 || { echo -e "${RED}Error: 'unzip' is required.${NC}"; exit 1; }
+fi
+
+# --- resolve version + url ---------------------------------------------------
+if [ -z "$requested_version" ]; then
+    url="https://github.com/${REPO}/releases/latest/download/$filename"
+    specific_version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+        | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -1)
+    if [ -z "$specific_version" ]; then
+        echo -e "${RED}Failed to fetch the latest version. Is there a published release?${NC}"
+        echo -e "  https://github.com/${REPO}/releases"
+        exit 1
+    fi
+else
+    requested_version="${requested_version#v}"
+    url="https://github.com/${REPO}/releases/download/v${requested_version}/$filename"
+    specific_version="$requested_version"
+    http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/${REPO}/releases/tag/v${requested_version}")
+    if [ "$http_status" = "404" ]; then
+        echo -e "${RED}Error: Release v${requested_version} not found${NC}"
+        echo -e "${MUTED}Available releases: https://github.com/${REPO}/releases${NC}"
+        exit 1
+    fi
+fi
+
+# --- skip if already installed at this version -------------------------------
+if command -v "$BINARY" >/dev/null 2>&1; then
+    installed_version=$("$BINARY" --version 2>/dev/null || echo "")
+    if [ "$installed_version" = "$specific_version" ]; then
+        echo -e "${MUTED}BlurbCode ${NC}$specific_version${MUTED} is already installed.${NC}"
+        exit 0
+    fi
+fi
+
+# --- download + install ------------------------------------------------------
+INSTALL_DIR="$HOME/.$APP/bin"
+mkdir -p "$INSTALL_DIR"
+tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/${APP}_install.XXXXXX")
+trap 'rm -rf "$tmp_dir"' EXIT
+
+echo -e "${MUTED}Installing ${NC}BlurbCode ${MUTED}version ${NC}$specific_version${MUTED} for ${NC}$target"
+curl -f# -L -o "$tmp_dir/$filename" "$url"
+
+if [ "$os" = "linux" ]; then
+    tar -xzf "$tmp_dir/$filename" -C "$tmp_dir"
+else
+    unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
+fi
+
+mv "$tmp_dir/$BINARY" "$INSTALL_DIR/$BINARY"
+chmod 755 "$INSTALL_DIR/$BINARY"
+
+# --- add to PATH -------------------------------------------------------------
+add_to_path() {
+    local config_file=$1 line=$2
+    if grep -Fxq "$line" "$config_file" 2>/dev/null; then
+        :
+    elif [[ -w "$config_file" || ! -e "$config_file" ]]; then
+        printf '\n# blurbcode\n%s\n' "$line" >> "$config_file"
+        echo -e "${MUTED}Added BlurbCode to \$PATH in ${NC}$config_file"
+    else
+        echo -e "${MUTED}Add this to your shell config manually:${NC}"
+        echo -e "  $line"
+    fi
+}
+
+if [[ "$no_modify_path" != "true" && ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+    current_shell=$(basename "${SHELL:-bash}")
+    case "$current_shell" in
+        fish) add_to_path "$HOME/.config/fish/config.fish" "fish_add_path $INSTALL_DIR" ;;
+        zsh)  add_to_path "${ZDOTDIR:-$HOME}/.zshrc" "export PATH=$INSTALL_DIR:\$PATH" ;;
+        *)    add_to_path "$HOME/.bashrc" "export PATH=$INSTALL_DIR:\$PATH" ;;
+    esac
+fi
+
+if [ -n "${GITHUB_ACTIONS:-}" ] && [ "${GITHUB_ACTIONS}" = "true" ]; then
+    echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+fi
+
+# --- done --------------------------------------------------------------------
+echo -e ""
+echo -e "${INDIGO}  ›${NC} BlurbCode installed."
+echo -e ""
+echo -e "${MUTED}Get paid while your agent works — you keep half of every impression.${NC}"
+echo -e ""
+echo -e "  cd <project>     ${MUTED}# open a project${NC}"
+echo -e "  $BINARY          ${MUTED}# start coding${NC}"
+echo -e "  $BINARY then run ${MUTED}/wallet${NC} ${MUTED}to link your earnings${NC}"
+echo -e ""
+echo -e "${MUTED}Open a new terminal (or 'source' your shell config) so '$BINARY' is on your PATH.${NC}"
+echo -e "${MUTED}Docs: ${NC}https://blurbcode.xyz"
+echo -e ""
