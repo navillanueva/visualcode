@@ -6,6 +6,7 @@ import { useDialog } from "../ui/dialog"
 import { adStore, type AdState } from "../kickback/ad-store"
 import { buildRevenueView, fetchBackendEarnings } from "../kickback/revenue"
 import { getClient, isConfigured } from "../kickback/backend"
+import { resolveVisualcodeConnection } from "../kickback/config"
 import type { Earnings } from "@kickback-ai/providers"
 
 // Kickback AI — developer revenue view (`/me`, Task 5).
@@ -23,6 +24,9 @@ export function DialogMe() {
   const dialog = useDialog()
   const [state, setState] = createSignal<AdState>(adStore.getState())
   const [backendEarnings, setBackendEarnings] = createSignal<Earnings | undefined>(undefined)
+  // The configured backend URL, used only to derive a verify link when the backend
+  // didn't send one. Resolved best-effort in onMount; stays undefined when unconfigured.
+  const [apiUrl, setApiUrl] = createSignal<string | undefined>(undefined)
   // Connection is resolved once at startup (backend.init) and again after /wallet
   // (backend.reconnect); the dialog is re-created each time it's opened, so reading it
   // here reflects the current state.
@@ -36,12 +40,26 @@ export function DialogMe() {
     fetchBackendEarnings(getClient())
       .then(setBackendEarnings)
       .catch(() => {})
+    // Resolve the backend URL for the verify-link fallback; best-effort, never throws.
+    resolveVisualcodeConnection()
+      .then((connection) => setApiUrl(connection?.apiUrl))
+      .catch(() => {})
   })
 
-  const view = createMemo(() => buildRevenueView(state(), connected, backendEarnings()))
+  const view = createMemo(() => buildRevenueView(state(), connected, backendEarnings(), apiUrl()))
+  // The personhood gate only fires once REAL earnings have loaded — never on the
+  // unconfigured/mock path or before the fetch resolves — so the dialog behaves
+  // exactly as today until the backend says the dev is connected-but-unverified.
+  const gated = createMemo(() => view().hasEarnings && !view().worldIdVerified)
 
   function openAd(url: string) {
     adStore.recordClick()
+    open(url).catch(() => {})
+  }
+
+  // Open the verify link without recording an ad click — it's a payout-gate action,
+  // not an impression interaction.
+  function openVerify(url: string) {
     open(url).catch(() => {})
   }
 
@@ -92,23 +110,49 @@ export function DialogMe() {
           <text fg={theme.text}>{view().hasEarnings ? view().impressions.toString() : "—"}</text>
         </box>
 
-        {/* Money */}
-        <box>
-          <box flexDirection="row" justifyContent="space-between">
-            <text fg={theme.textMuted}>Accrued earnings (50% share)</text>
-            <Show when={view().hasEarnings} fallback={<text fg={theme.textMuted}>—</text>}>
-              <text fg={theme.success} attributes={TextAttributes.BOLD}>
-                {view().earningsUsdc} USDC
+        {/* Money — gated behind World ID personhood (Plan 5). An unverified dev never
+            sees a withdrawable number; impressions above stay visible so accrued value
+            is still shown. The proof is produced on the web (no DOM here); the TUI only
+            surfaces + enforces. */}
+        <Show
+          when={gated()}
+          fallback={
+            <box>
+              <box flexDirection="row" justifyContent="space-between">
+                <text fg={theme.textMuted}>Accrued earnings (50% share)</text>
+                <Show when={view().hasEarnings} fallback={<text fg={theme.textMuted}>—</text>}>
+                  <text fg={theme.success} attributes={TextAttributes.BOLD}>
+                    {view().earningsUsdc} USDC
+                  </text>
+                </Show>
+              </box>
+              <Show when={view().walletAddress}>
+                <box flexDirection="row" justifyContent="space-between">
+                  <text fg={theme.textMuted}>Wallet</text>
+                  <text fg={theme.text}>{view().walletAddress}</text>
+                </box>
+              </Show>
+            </box>
+          }
+        >
+          <box>
+            <text fg={theme.warning} attributes={TextAttributes.BOLD} wrapMode="word">
+              ⚠ Verify your humanity to receive payouts
+            </text>
+            <Show
+              when={view().verifyUrl}
+              fallback={
+                <text fg={theme.textMuted} wrapMode="word">
+                  Open the Visual Code web app → wallet page to verify.
+                </text>
+              }
+            >
+              <text fg={theme.textMuted} wrapMode="word" onMouseUp={() => openVerify(view().verifyUrl)}>
+                Verify at {view().verifyUrl}
               </text>
             </Show>
           </box>
-          <Show when={view().walletAddress}>
-            <box flexDirection="row" justifyContent="space-between">
-              <text fg={theme.textMuted}>Wallet</text>
-              <text fg={theme.text}>{view().walletAddress}</text>
-            </box>
-          </Show>
-        </box>
+        </Show>
 
         {/* Consent + provenance */}
         <box flexDirection="row" gap={1}>

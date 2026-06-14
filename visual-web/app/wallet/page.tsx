@@ -7,7 +7,8 @@ import { createDeviceToken } from "@/lib/api"
 import { fromBaseUnits } from "@/lib/money"
 import { useMe } from "@/lib/useMe"
 import { BlurbMark } from "@/components/BlurbMark"
-import { ArrowRight, Check, Coin, Copy, Lock, WarningTriangle } from "@/components/Icons"
+import { VerifyHuman } from "@/components/VerifyHuman"
+import { ArrowRight, Check, Coin, Copy, Lock, Shield, WarningTriangle } from "@/components/Icons"
 
 // Format a balance (token base-unit string) as a "$0.00" USD figure. Unknown or
 // not-yet-loaded balances read as "$0.00" — never a fake placeholder.
@@ -33,7 +34,7 @@ const PRIVACY = [
 ]
 
 export default function WalletPage() {
-  const { me, isLoggedIn } = useMe()
+  const { me, isLoggedIn, refresh } = useMe()
   const { primaryWallet, setShowAuthFlow } = useDynamicContext()
   const connected = isLoggedIn || me !== null
 
@@ -56,7 +57,12 @@ export default function WalletPage() {
       </div>
 
       {connected ? (
-        <ConnectedState address={me?.address ?? primaryWallet?.address ?? null} balanceBaseUnits={me?.balanceBaseUnits} />
+        <ConnectedState
+          address={me?.address ?? primaryWallet?.address ?? null}
+          balanceBaseUnits={me?.balanceBaseUnits}
+          worldIdVerified={me?.worldIdVerified ?? false}
+          onVerified={refresh}
+        />
       ) : (
         <div className="grid-collapse" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
           {/* sign-in method */}
@@ -108,7 +114,17 @@ export default function WalletPage() {
   )
 }
 
-function ConnectedState({ address, balanceBaseUnits }: { address: string | null; balanceBaseUnits?: string }) {
+function ConnectedState({
+  address,
+  balanceBaseUnits,
+  worldIdVerified,
+  onVerified,
+}: {
+  address: string | null
+  balanceBaseUnits?: string
+  worldIdVerified: boolean
+  onVerified: () => void
+}) {
   const [token, setToken] = useState<string | null>(null)
   const [tokenError, setTokenError] = useState(false)
   const [reveal, setReveal] = useState(false)
@@ -239,6 +255,21 @@ function ConnectedState({ address, balanceBaseUnits }: { address: string | null;
         <Link href="/me" className="btn btn--outline btn--block">
           Go to my earnings <ArrowRight size={17} />
         </Link>
+
+        {/* Personhood gate (Plan 5): you can only receive payouts from a
+            World-ID-bound account. Verified → badge; otherwise → the widget. */}
+        <div style={{ borderTop: "1px solid var(--g-300)", marginTop: 22, paddingTop: 22 }}>
+          {worldIdVerified ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 500, color: "var(--earn-text)" }}>
+              <span style={{ display: "inline-flex" }}>
+                <Shield size={16} strokeWidth={1.6} />
+              </span>
+              <Check size={15} strokeWidth={2.4} /> Verified human
+            </div>
+          ) : (
+            <VerifyHuman copy="Verify you're human to receive payouts." onVerified={onVerified} />
+          )}
+        </div>
       </div>
     </div>
   )

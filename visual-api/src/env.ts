@@ -10,6 +10,12 @@ export interface ServerConfig {
   secureCookies: boolean
   settlementMode: "mock" | "real"
   dynamic: { environmentId?: string; serverApiKey?: string }
+  /** World ID personhood gate. `appId` unset ⇒ the verify-human endpoint degrades
+   *  to 503 and the gates are no-ops (mock/dev). `verifyUrl` overrides the cloud
+   *  verify base (the 4.0 ⟷ classic endpoint swap is env-driven, see world-id.ts). */
+  worldId: { appId?: string; action: string; verifyUrl?: string }
+  /** Public web app base URL, surfaced in earnings so the TUI can link to verify. */
+  webAppUrl?: string
 }
 
 function required(env: Record<string, string | undefined>, key: string): string {
@@ -38,5 +44,11 @@ export function loadServerConfig(env: Record<string, string | undefined> = proce
       environmentId: env.DYNAMIC_ENVIRONMENT_ID?.trim() || undefined,
       serverApiKey: env.DYNAMIC_SERVER_API_KEY?.trim() || undefined,
     },
+    worldId: {
+      appId: env.WORLD_ID_APP_ID?.trim() || undefined,
+      action: env.WORLD_ID_ACTION?.trim() || "visualcode-account",
+      verifyUrl: env.WORLD_ID_VERIFY_URL?.trim() || undefined,
+    },
+    webAppUrl: env.WEB_APP_URL?.trim() || undefined,
   }
 }

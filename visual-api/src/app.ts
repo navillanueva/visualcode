@@ -23,6 +23,7 @@ import { toBaseUnits, USDC_DECIMALS } from "@kickback/money"
 import { encryptSecret } from "./auth/crypto"
 import { SESSION_COOKIE, signSession, verifySession } from "./auth/session"
 import type { DynamicVerifier } from "./auth/dynamic"
+import type { WorldIdVerifier } from "./auth/world-id"
 import type { SettlementService } from "./settlement/service"
 
 export interface AppDeps {
@@ -33,6 +34,14 @@ export interface AppDeps {
   secureCookies: boolean
   /** Allowed browser origins; null = reflect request origin (dev). */
   corsOrigins: string[] | null
+  /**
+   * World ID personhood gate. `appId` set ⇒ the verify-human endpoint + gates are
+   * live; unset ⇒ verify-human returns 503 and the gates are no-ops (mock/dev).
+   * `verifier` performs the server-side proof validation (the bounty requirement).
+   */
+  worldId?: { appId?: string; verifier?: WorldIdVerifier }
+  /** Public web app base URL, surfaced in earnings so the TUI can link to verify. */
+  webAppUrl?: string
   /**
    * Where advertisers send their public USDC payment (the treasury EOA) + which
    * token/chain/decimals — surfaced via GET /api/treasury so the web hardcodes
@@ -215,6 +224,11 @@ export function createApp(deps: AppDeps) {
   // CONTRACT: POST /api/campaigns { advertiser, text, url, budgetBaseUnits } → { campaign }
   // (bid is fixed server-side at $10/1,000 views; any client-sent bid is ignored.)
   app.post("/api/campaigns", sessionAuth, async (c) => {
+    // Advertiser KYB: one shared World ID action ⇒ a campaign can only run from a
+    // proof-of-human account, so randoms can't push abusive ad copy.
+    if (deps.worldId?.appId && !(await repo.isWorldIdVerified(deps.db, c.get("accountId")))) {
+      return c.json({ ok: false, error: "personhood_required" }, 403)
+    }
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null
     const advertiser = asString(body?.["advertiser"])
     const text = asString(body?.["text"])
@@ -303,13 +317,19 @@ export function createApp(deps: AppDeps) {
     return c.json({ campaign: activated, txRef })
   })
 
-  // CONTRACT: GET /api/me → { address, balanceBaseUnits, role }
+  // CONTRACT: GET /api/me → { address, balanceBaseUnits, role, worldIdVerified }
   app.get("/api/me", sessionAuth, async (c) => {
     const accountId = c.get("accountId")
     const account = await repo.getAccountById(deps.db, accountId)
     const { balanceBaseUnits } = await repo.getEarnings(deps.db, accountId)
     const role = await repo.accountRole(deps.db, accountId)
-    return c.json({ address: account?.address ?? "", balanceBaseUnits: balanceBaseUnits.toString(), role })
+    const worldIdVerified = await repo.isWorldIdVerified(deps.db, accountId)
+    return c.json({
+      address: account?.address ?? "",
+      balanceBaseUnits: balanceBaseUnits.toString(),
+      role,
+      worldIdVerified,
+    })
   })
 
   // CONTRACT: GET /api/me/impressions?limit=N (default 50, max 200) → the session
@@ -341,9 +361,36 @@ export function createApp(deps: AppDeps) {
     return c.json({ impressions })
   })
 
+  // CONTRACT: POST /api/me/verify-human { ...IDKit payload } → bind the World ID
+  // nullifier to the session account (the personhood gate, validated server-side).
+  // 200 {ok,worldIdVerified} · 409 already_linked (nullifier on another account —
+  // the anti-Sybil block) · 400 verification_failed · 503 worldid_not_configured.
+  app.post("/api/me/verify-human", sessionAuth, async (c) => {
+    const verifier = deps.worldId?.verifier
+    if (!deps.worldId?.appId || !verifier) {
+      return c.json({ ok: false, error: "worldid_not_configured" }, 503)
+    }
+    const payload = await c.req.json().catch(() => null)
+    let nullifierHash: string
+    try {
+      ;({ nullifierHash } = await verifier.verify(payload))
+    } catch {
+      // Never surface the verifier's message (it can reference proof material).
+      return c.json({ ok: false, error: "verification_failed" }, 400)
+    }
+    const result = await repo.bindWorldId(deps.db, c.get("accountId"), nullifierHash)
+    if (result === "conflict") return c.json({ ok: false, error: "already_linked" }, 409)
+    return c.json({ ok: true, worldIdVerified: true })
+  })
+
   // CONTRACT: POST /api/withdraw → settle earnings to the account's wallet
   app.post("/api/withdraw", sessionAuth, async (c) => {
     const accountId = c.get("accountId")
+    // Developer payout gate (PRIMARY anti-Sybil): you can only RECEIVE payment from
+    // a World-ID-bound account, which kills the multi-terminal Sybil farm.
+    if (deps.worldId?.appId && !(await repo.isWorldIdVerified(deps.db, accountId))) {
+      return c.json({ ok: false, error: "personhood_required" }, 403)
+    }
     const account = await repo.getAccountById(deps.db, accountId)
     const { balanceBaseUnits } = await repo.getEarnings(deps.db, accountId)
     if (balanceBaseUnits <= 0n) return c.json({ ok: true, withdrawnBaseUnits: "0", txRef: null })
@@ -397,16 +444,21 @@ export function createApp(deps: AppDeps) {
     return c.json({ ok: true, creditedBaseUnits: credited.toString() })
   })
 
-  // CONTRACT: GET /api/me/earnings → { balanceBaseUnits, impressions, clicks, walletAddress }
+  // CONTRACT: GET /api/me/earnings → { balanceBaseUnits, impressions, clicks,
+  // walletAddress, worldIdVerified, verifyUrl }. The TUI reads worldIdVerified to
+  // refuse payout (and link to verifyUrl) until the human is proven.
   app.get("/api/me/earnings", bearerAuth, async (c) => {
     const accountId = c.get("accountId")
     const account = await repo.getAccountById(deps.db, accountId)
     const { balanceBaseUnits, impressions } = await repo.getEarnings(deps.db, accountId)
+    const worldIdVerified = await repo.isWorldIdVerified(deps.db, accountId)
     return c.json({
       balanceBaseUnits: balanceBaseUnits.toString(),
       impressions,
       clicks: 0,
       walletAddress: account?.address ?? "",
+      worldIdVerified,
+      verifyUrl: deps.webAppUrl ?? null,
     })
   })
 

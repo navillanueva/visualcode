@@ -39,6 +39,8 @@ export interface Me {
   address: string
   balanceBaseUnits: string
   role?: string
+  /** True once the account has linked a World ID proof (Plan 5 personhood gate). */
+  worldIdVerified?: boolean
 }
 
 export interface AuthResult {
@@ -145,6 +147,55 @@ export function createDeviceToken(): Promise<{ token: string }> {
 /** Settle accrued earnings to the account's wallet (Gateway x402 + Unlink). */
 export function withdraw(): Promise<{ ok: boolean; txRef?: string | null }> {
   return request<{ ok: boolean; txRef?: string | null }>("/api/withdraw", { method: "POST" })
+}
+
+// --- World ID personhood (Plan 5) -----------------------------------------
+
+/**
+ * The IDKit success payload, forwarded to the backend verbatim. Structurally
+ * matches `ISuccessResult` from `@worldcoin/idkit` (classic widget), so the
+ * component can hand the proof straight through without re-shaping it.
+ */
+export interface WorldIdProof {
+  proof: string
+  merkle_root: string
+  nullifier_hash: string
+  verification_level: string
+}
+
+/** Outcome of POST /api/me/verify-human. `error` is the backend's machine code. */
+export interface VerifyHumanResult {
+  ok: boolean
+  /** e.g. "already_linked" (409), "verification_failed" (400), "worldid_not_configured" (503). */
+  error?: string
+}
+
+/**
+ * Link a World ID proof to the logged-in account (the anti-Sybil personhood
+ * gate). Authenticates with the same Bearer session token as every other authed
+ * call. The backend's error states (409 already_linked / 400 verification_failed
+ * / 503 worldid_not_configured) arrive as non-2xx responses; we decode the
+ * `{error}` body and return it so callers can show friendly messaging instead of
+ * a raw throw. Non-API failures (network) still surface as a thrown ApiError.
+ */
+export async function verifyHuman(payload: WorldIdProof): Promise<VerifyHumanResult> {
+  try {
+    return await request<VerifyHumanResult>("/api/me/verify-human", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    })
+  } catch (e) {
+    // The contract's failure responses carry a JSON `{ok:false,error}` body.
+    if (e instanceof ApiError && e.status > 0 && e.body) {
+      try {
+        const parsed = JSON.parse(e.body) as VerifyHumanResult
+        if (typeof parsed?.error === "string") return { ok: false, error: parsed.error }
+      } catch {
+        /* non-JSON body — fall through to rethrow so the failure stays visible */
+      }
+    }
+    throw e
+  }
 }
 
 // --- Campaigns ------------------------------------------------------------

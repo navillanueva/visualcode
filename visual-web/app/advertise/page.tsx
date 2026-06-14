@@ -4,11 +4,12 @@ import { useEffect, useState } from "react"
 import { useDynamicContext } from "@dynamic-labs/sdk-react-core"
 import { isEthereumWallet } from "@dynamic-labs/ethereum"
 import { createPublicClient, erc20Abi, http } from "viem"
-import { createCampaign, fundCampaign, getTreasury, type Campaign, type Treasury } from "@/lib/api"
+import { ApiError, createCampaign, fundCampaign, getTreasury, type Campaign, type Treasury } from "@/lib/api"
 import { ARC_RPC_URL, arcTestnet } from "@/lib/arc"
 import { fromBaseUnits, toBaseUnits } from "@/lib/money"
 import { useMe } from "@/lib/useMe"
 import { Spinner } from "@/components/Spinner"
+import { VerifyHuman } from "@/components/VerifyHuman"
 import { Check, Lock } from "@/components/Icons"
 
 // Pricing is FIXED platform-wide: $10 per 1,000 views. The advertiser never bids
@@ -21,14 +22,20 @@ const FIXED_PRICE_LABEL = "$10 per 1,000 views"
 const EMPTY = { advertiser: "", text: "", url: "", budget: "" }
 
 export default function AdvertisePage() {
-  const { me, isLoggedIn } = useMe()
+  const { me, isLoggedIn, refresh } = useMe()
   const { primaryWallet, setShowAuthFlow } = useDynamicContext()
   const authed = isLoggedIn || me !== null
+  // KYB personhood gate (Plan 5): an advertiser must be a verified human before
+  // a campaign can run. Drives both the up-front gate and the 403 recovery path.
+  const verified = me?.worldIdVerified ?? false
 
   const [form, setForm] = useState(EMPTY)
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Set if POST /api/campaigns came back 403 personhood_required (e.g. `me` was
+  // stale). Forces the verify gate even when the cached flag said otherwise.
+  const [needsVerify, setNeedsVerify] = useState(false)
 
   // The single ad created this session. Once created it can't be re-created (that
   // would duplicate it on a payment retry), so we lock the form and only re-pay.
@@ -149,7 +156,15 @@ export default function AdvertisePage() {
       setStatus(null)
       setLive(funded)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      // The backend gates campaign creation on personhood: a 403 means this
+      // advertiser hasn't linked a World ID. Surface the verify widget instead
+      // of a raw error so they can fix it inline.
+      if (err instanceof ApiError && err.status === 403 && err.body.includes("personhood_required")) {
+        setNeedsVerify(true)
+        setError("Verify you're human to run ads.")
+      } else {
+        setError(err instanceof Error ? err.message : String(err))
+      }
       setStatus(null)
     } finally {
       setBusy(false)
@@ -186,7 +201,7 @@ export default function AdvertisePage() {
 
       {/* form + live preview */}
       <div className="grid-collapse" style={{ display: "grid", gridTemplateColumns: "0.95fr 1.05fr", gap: 20, alignItems: "start" }}>
-        {/* left column: create form OR live confirmation */}
+        {/* left column: verify gate OR create form OR live confirmation */}
         {live ? (
           <div className="card card--18">
             <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
@@ -224,6 +239,15 @@ export default function AdvertisePage() {
               Create another ad →
             </button>
           </div>
+        ) : authed && (!verified || needsVerify) ? (
+          <VerifyHuman
+            copy="Verify you're human to run ads."
+            onVerified={() => {
+              setNeedsVerify(false)
+              setError(null)
+              void refresh()
+            }}
+          />
         ) : (
           <div className="card card--18">
             <h2 className="display" style={{ fontSize: 20, letterSpacing: "-0.01em", margin: "0 0 4px" }}>

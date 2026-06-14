@@ -232,6 +232,7 @@ describe("revenue — backend earnings overlay", () => {
       impressions: 100,
       clicks: 4,
       walletAddress: "0xdev",
+      worldIdVerified: true,
     })
     expect(view.connected).toBe(true)
     expect(view.hasEarnings).toBe(true)
@@ -252,7 +253,7 @@ describe("revenue — backend earnings overlay", () => {
   })
 
   test("fetchBackendEarnings: ok result → earnings", async () => {
-    const earnings = { balanceBaseUnits: 1n, impressions: 1, clicks: 0, walletAddress: "0x" }
+    const earnings = { balanceBaseUnits: 1n, impressions: 1, clicks: 0, walletAddress: "0x", worldIdVerified: false }
     const client = fakeClient({ getEarnings: async () => ({ ok: true, earnings }) })
     expect(await fetchBackendEarnings(client)).toEqual(earnings)
   })

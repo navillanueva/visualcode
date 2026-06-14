@@ -29,4 +29,6 @@ was planned and built with AI.
 - `visual-code-mvp-architecture.md` — the "backend is the hub" MVP architecture.
 - `plans/` — `CONTRACT.md` (the shared API contract) + per-component plans (TUI / frontend / backend),
   and `plan-4-private-custodial-settlement.md` (v0.4: make payments private via Unlink — custodial
-  pooled model, real deposit + withdraw legs, ledger does the 50/50 split).
+  pooled model, real deposit + withdraw legs, ledger does the 50/50 split),
+  and `plan-5-world-id-personhood.md` (Track B: World ID 4.0 as a real constraint — one human = one
+  payout account, killing the multi-terminal Sybil farm; advertiser KYB on the same widget).

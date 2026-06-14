@@ -4,6 +4,7 @@
 
 import { createApp, type TreasuryInfo } from "./app"
 import { createDynamicVerifier } from "./auth/dynamic"
+import { createWorldIdVerifier } from "./auth/world-id"
 import { createDatabase } from "./db/index"
 import { applySchema } from "./db/migrate"
 import { loadServerConfig } from "./env"
@@ -19,6 +20,15 @@ const dynamicVerifier = createDynamicVerifier({
   environmentId: config.dynamic.environmentId,
   serverApiKey: config.dynamic.serverApiKey,
 })
+// World ID verifier is constructed only when WORLD_ID_APP_ID is set; otherwise the
+// verify-human endpoint returns 503 and the personhood gates are no-ops (mock/dev).
+const worldIdVerifier = config.worldId.appId
+  ? createWorldIdVerifier({
+      appId: config.worldId.appId,
+      action: config.worldId.action,
+      verifyUrl: config.worldId.verifyUrl,
+    })
+  : undefined
 
 // Treasury info for GET /api/treasury (the EOA advertisers pay + token/chain/decimals).
 const kb = readKickbackEnv()
@@ -34,6 +44,8 @@ const app = createApp({
   tokenSigningSecret: config.tokenSigningSecret,
   secureCookies: config.secureCookies,
   corsOrigins: config.corsOrigins,
+  worldId: { appId: config.worldId.appId, verifier: worldIdVerifier },
+  webAppUrl: config.webAppUrl,
   treasury,
   // Fixed-price bid uses the deployment's USDC decimals (ARC_USDC_DECIMALS); the
   // app defaults to USDC_DECIMALS when arc isn't configured (mock/dev).

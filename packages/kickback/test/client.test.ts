@@ -56,7 +56,7 @@ describe("parseEarnings", () => {
   test("parses base-unit strings + counts", () => {
     expect(
       parseEarnings({ balanceBaseUnits: "1500000", impressions: 42, clicks: 3, walletAddress: "0xabc" }),
-    ).toEqual({ balanceBaseUnits: 1_500_000n, impressions: 42, clicks: 3, walletAddress: "0xabc" })
+    ).toEqual({ balanceBaseUnits: 1_500_000n, impressions: 42, clicks: 3, walletAddress: "0xabc", worldIdVerified: false })
   })
 
   test("missing balance or wallet is malformed", () => {
@@ -66,6 +66,36 @@ describe("parseEarnings", () => {
 
   test("a non-integer base-units string is rejected", () => {
     expect(parseEarnings({ balanceBaseUnits: "1.5", walletAddress: "0xabc" })).toBeUndefined()
+  })
+
+  test("worldIdVerified defaults to false when the field is absent", () => {
+    const earnings = parseEarnings({ balanceBaseUnits: "1000000", walletAddress: "0xabc" })
+    expect(earnings?.worldIdVerified).toBe(false)
+  })
+
+  test("worldIdVerified is true when the backend sends true, with verifyUrl surfaced", () => {
+    const earnings = parseEarnings({
+      balanceBaseUnits: "1000000",
+      walletAddress: "0xabc",
+      worldIdVerified: true,
+      verifyUrl: "https://app.test/wallet",
+    })
+    expect(earnings?.worldIdVerified).toBe(true)
+    expect(earnings?.verifyUrl).toBe("https://app.test/wallet")
+  })
+
+  test("a non-true worldIdVerified value never unlocks payout", () => {
+    // Anything that isn't a literal `true` (string "true", 1, etc.) stays unverified.
+    expect(parseEarnings({ balanceBaseUnits: "1", walletAddress: "0xabc", worldIdVerified: "true" })?.worldIdVerified).toBe(
+      false,
+    )
+    expect(parseEarnings({ balanceBaseUnits: "1", walletAddress: "0xabc", worldIdVerified: 1 })?.worldIdVerified).toBe(false)
+  })
+
+  test("verifyUrl is omitted when absent or not a string", () => {
+    const earnings = parseEarnings({ balanceBaseUnits: "1", walletAddress: "0xabc" })
+    expect(earnings).not.toHaveProperty("verifyUrl")
+    expect(parseEarnings({ balanceBaseUnits: "1", walletAddress: "0xabc", verifyUrl: 42 })).not.toHaveProperty("verifyUrl")
   })
 })
 
@@ -148,7 +178,7 @@ describe("createKickbackClient — getEarnings", () => {
     const res = await createKickbackClient({ ...OPTS, fetch }).getEarnings()
     expect(res).toEqual({
       ok: true,
-      earnings: { balanceBaseUnits: 1_000_000n, impressions: 10, clicks: 2, walletAddress: "0xdev" },
+      earnings: { balanceBaseUnits: 1_000_000n, impressions: 10, clicks: 2, walletAddress: "0xdev", worldIdVerified: false },
     })
   })
 

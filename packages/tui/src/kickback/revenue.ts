@@ -33,6 +33,18 @@ export interface RevenueView {
   earningsUsdc: string
   /** Developer's settlement wallet address (backend). Empty until earnings load. */
   walletAddress: string
+  /**
+   * World ID personhood gate (Plan 5). False ⇒ the dialog hides the payout value and
+   * shows a "verify your humanity to receive payouts" banner instead, while still
+   * showing impressions. Defaults to false until real backend earnings load, so the
+   * unconfigured/mock path (no earnings) never surfaces a payout to an unverified dev.
+   */
+  worldIdVerified: boolean
+  /**
+   * Where to verify. The backend `verifyUrl` when present, else the configured
+   * apiUrl's wallet page, else "" (the dialog falls back to generic instructions).
+   */
+  verifyUrl: string
 }
 
 /**
@@ -45,8 +57,16 @@ export interface RevenueView {
  *     the "paste a device token via /wallet" prompt. No fabricated balance or ad.
  *   - Connected: the served ad comes from the ad-store (display) while the balance,
  *     impressions, and settlement wallet are the backend's source of truth.
+ *
+ * `apiUrl` (the configured backend URL) is used only to derive a verify link when the
+ * backend didn't send one — pure string work, so this stays trivially testable.
  */
-export function buildRevenueView(state: AdState, connected: boolean, earnings: Earnings | undefined): RevenueView {
+export function buildRevenueView(
+  state: AdState,
+  connected: boolean,
+  earnings: Earnings | undefined,
+  apiUrl?: string,
+): RevenueView {
   return {
     connected,
     hasEarnings: earnings !== undefined,
@@ -58,7 +78,22 @@ export function buildRevenueView(state: AdState, connected: boolean, earnings: E
     impressions: earnings?.impressions ?? 0,
     earningsUsdc: earnings ? fromBaseUnits(earnings.balanceBaseUnits) : "0",
     walletAddress: earnings?.walletAddress ?? "",
+    // Default false until real earnings load: an unloaded/unconfigured view never
+    // claims a dev is verified, but the dialog only shows the gate once earnings exist.
+    worldIdVerified: earnings?.worldIdVerified ?? false,
+    verifyUrl: resolveVerifyUrl(earnings?.verifyUrl, apiUrl),
   }
+}
+
+/**
+ * Choose the verification link the dialog shows an unverified dev: the backend's
+ * `verifyUrl` first, else the configured backend URL's wallet page, else "" so the
+ * dialog can fall back to generic instructions. Pure — no I/O.
+ */
+function resolveVerifyUrl(backendVerifyUrl: string | undefined, apiUrl: string | undefined): string {
+  if (backendVerifyUrl) return backendVerifyUrl
+  if (apiUrl) return `${apiUrl.replace(/\/+$/, "")}/wallet`
+  return ""
 }
 
 /**

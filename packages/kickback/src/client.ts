@@ -41,6 +41,16 @@ export interface Earnings {
   impressions: number
   clicks: number
   walletAddress: string
+  /**
+   * World ID personhood gate (Plan 5). When false the developer has not bound a
+   * unique human proof yet, so the TUI surfaces a "verify to get paid" banner in
+   * place of the payout while accrual keeps flowing. Defaults to false when the
+   * backend omits the field (older API / unconfigured), so we never reveal a
+   * withdrawable number to an unverified account.
+   */
+  worldIdVerified: boolean
+  /** Optional web wallet-page URL where the dev produces the World ID proof. */
+  verifyUrl?: string
 }
 
 /** Result of `getEarnings()`. */
@@ -125,11 +135,16 @@ export function parseEarnings(raw: unknown): Earnings | undefined {
   const balanceBaseUnits = parseBaseUnits(e.balanceBaseUnits)
   const walletAddress = asString(e.walletAddress)
   if (balanceBaseUnits === undefined || walletAddress === undefined) return undefined
+  // worldIdVerified is the personhood gate (Plan 5). Treat anything that isn't a
+  // literal `true` as unverified — a missing/garbled field must NEVER unlock payout.
+  const verifyUrl = asString(e.verifyUrl)
   return {
     balanceBaseUnits,
     impressions: parseCount(e.impressions),
     clicks: parseCount(e.clicks),
     walletAddress,
+    worldIdVerified: e.worldIdVerified === true,
+    ...(verifyUrl !== undefined ? { verifyUrl } : {}),
   }
 }
 

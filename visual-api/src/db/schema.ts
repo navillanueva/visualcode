@@ -12,6 +12,11 @@ export const accounts = pgTable("accounts", {
   /** Encrypted private key — only set for the custodial import fallback. */
   encPrivateKey: text("enc_private_key"),
   email: text("email"),
+  /** World ID nullifier hash — unique per (human, app, action). The DB-unique
+   *  constraint enforces one-human-one-account (the anti-Sybil constraint). */
+  worldIdNullifier: text("world_id_nullifier").unique(),
+  /** When the World ID nullifier was bound to this account (null = unverified). */
+  worldIdVerifiedAt: timestamp("world_id_verified_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 })
 

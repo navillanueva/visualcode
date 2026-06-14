@@ -6,7 +6,7 @@ import { PGlite } from "@electric-sql/pglite"
 import { drizzle } from "drizzle-orm/pglite"
 // drizzle-orm/pglite accepts a client via the config object form.
 import { generateKeyPair, SignJWT, type KeyLike } from "jose"
-import { createApp, type TreasuryInfo } from "../src/app"
+import { createApp, type AppDeps, type TreasuryInfo } from "../src/app"
 import { createDynamicVerifier } from "../src/auth/dynamic"
 import type { Database } from "../src/db/index"
 import { applySchema } from "../src/db/migrate"
@@ -25,7 +25,13 @@ export interface TestHarness {
 export const TEST_SECRET = "test-token-signing-secret-0123456789"
 
 export async function makeHarness(
-  opts: { now?: () => number; settlement?: SettlementService; treasury?: TreasuryInfo | null } = {},
+  opts: {
+    now?: () => number
+    settlement?: SettlementService
+    treasury?: TreasuryInfo | null
+    /** Inject a (stub) World ID verifier to exercise the personhood gate. */
+    worldId?: AppDeps["worldId"]
+  } = {},
 ): Promise<TestHarness> {
   const client = new PGlite()
   const db = drizzle({ client }) as unknown as Database
@@ -42,6 +48,7 @@ export async function makeHarness(
     tokenSigningSecret: TEST_SECRET,
     secureCookies: false,
     corsOrigins: null,
+    worldId: opts.worldId,
     treasury: opts.treasury ?? null,
     now: opts.now,
   })

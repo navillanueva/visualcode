@@ -322,6 +322,42 @@ export async function recordSettlement(
   })
 }
 
+/**
+ * Bind a World ID nullifier to an account (the personhood gate). Idempotent for
+ * the same account; "conflict" when the nullifier already belongs to a DIFFERENT
+ * account — that is the one-human-one-account anti-Sybil block. The DB unique
+ * index is the source of truth: we also catch its violation to win the race when
+ * two accounts present the same nullifier concurrently.
+ */
+export async function bindWorldId(
+  db: Database,
+  accountId: string,
+  nullifier: string,
+): Promise<"ok" | "conflict"> {
+  const [holder] = await db.select().from(accounts).where(eq(accounts.worldIdNullifier, nullifier))
+  if (holder && holder.id !== accountId) return "conflict"
+  try {
+    await db
+      .update(accounts)
+      .set({ worldIdNullifier: nullifier, worldIdVerifiedAt: new Date() })
+      .where(eq(accounts.id, accountId))
+  } catch (e) {
+    // Unique-index violation from a concurrent bind of the same nullifier.
+    if (e instanceof Error && /unique|duplicate/i.test(e.message)) return "conflict"
+    throw e
+  }
+  return "ok"
+}
+
+/** True when the account has a bound World ID nullifier (personhood verified). */
+export async function isWorldIdVerified(db: Database, accountId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ nullifier: accounts.worldIdNullifier })
+    .from(accounts)
+    .where(eq(accounts.id, accountId))
+  return Boolean(row?.nullifier)
+}
+
 /** Compute a coarse role for GET /api/me from the account's activity. */
 export async function accountRole(
   db: Database,
