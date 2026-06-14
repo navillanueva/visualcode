@@ -55,6 +55,7 @@ import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { Sidebar } from "./sidebar"
 import { SubagentFooter } from "./subagent-footer.tsx"
+import { StatusBarAd } from "../../kickback/status-bar-ad"
 import { filetype } from "../../util/filetype"
 import parsers from "../../parsers-config"
 import { errorMessage } from "../../util/error"
@@ -1484,6 +1485,13 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
     return props.message.time.completed - user.time.created
   })
 
+  // Kickback AI — the live throbber line (the last message, not yet finalized and not
+  // aborted) is the in-conversation "spinner line". Surface the auction ad there while
+  // the agent works; once it finalizes, this flips false and the ad falls away.
+  const working = createMemo(
+    () => props.last && !final() && props.message.error?.name !== "MessageAbortedError",
+  )
+
   const childShortcut = useCommandShortcut("session.child.first")
   const backgroundShortcut = useCommandShortcut("session.background")
 
@@ -1542,8 +1550,14 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
       </Show>
       <Switch>
         <Match when={props.last || final() || props.message.error?.name === "MessageAbortedError"}>
-          <box id={`assistant-summary-${props.message.id}`} paddingLeft={3}>
-            <text marginTop={1}>
+          <box
+            id={`assistant-summary-${props.message.id}`}
+            paddingLeft={3}
+            marginTop={1}
+            flexDirection="row"
+            gap={1}
+          >
+            <text>
               <span
                 style={{
                   fg:
@@ -1563,6 +1577,12 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
                 <span style={{ fg: theme.textMuted }}> · interrupted</span>
               </Show>
             </text>
+            {/* Kickback AI — surface the auction ad on the live throbber line while the
+                agent works (display-only, never enters the LLM context). Renders nothing
+                when consent is off or no ad is set. */}
+            <Show when={working()}>
+              <StatusBarAd />
+            </Show>
           </box>
         </Match>
       </Switch>
