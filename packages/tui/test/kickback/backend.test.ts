@@ -3,7 +3,7 @@ import type { KickbackClient } from "@kickback-ai/providers"
 import * as Backend from "../../src/kickback/backend"
 import { adStore, SAMPLE_AD, adFromServed } from "../../src/kickback/ad-store"
 import { startViewTracking, type ViewTrackingTimers } from "../../src/kickback/view-tracking"
-import { buildRevenueView, withBackendEarnings, fetchBackendEarnings } from "../../src/kickback/revenue"
+import { buildRevenueView, fetchBackendEarnings } from "../../src/kickback/revenue"
 
 // Verifies the graceful-degradation contract: with NO client configured the ad
 // surfaces behave exactly as the offline mock (SAMPLE_AD, no reporting), and with a
@@ -144,21 +144,24 @@ describe("revenue — backend earnings overlay", () => {
     developerEarningsBaseUnits: 26_500n,
   }
 
-  test("mock view is the default source", () => {
-    const view = buildRevenueView(adState, 1_000_000n)
-    expect(view.source).toBe("mock")
-    expect(view.impressions).toBe(3)
+  test("not connected → ad suppressed, no money (no fabricated balance)", () => {
+    const view = buildRevenueView(adState, false, undefined)
+    expect(view.connected).toBe(false)
+    expect(view.hasAd).toBe(false)
+    expect(view.impressions).toBe(0)
+    expect(view.earningsUsdc).toBe("0")
     expect(view.walletAddress).toBe("")
   })
 
-  test("withBackendEarnings overlays backend money + counters", () => {
-    const view = withBackendEarnings(buildRevenueView(adState, 0n), {
+  test("connected with backend earnings → real money + counters", () => {
+    const view = buildRevenueView(adState, true, {
       balanceBaseUnits: 5_000_000n,
       impressions: 100,
       clicks: 4,
       walletAddress: "0xdev",
     })
-    expect(view.source).toBe("backend")
+    expect(view.connected).toBe(true)
+    expect(view.hasEarnings).toBe(true)
     expect(view.earningsUsdc).toBe("5")
     expect(view.impressions).toBe(100)
     expect(view.walletAddress).toBe("0xdev")

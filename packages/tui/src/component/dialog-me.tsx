@@ -4,17 +4,17 @@ import open from "open"
 import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
 import { adStore, type AdState } from "../kickback/ad-store"
-import { buildRevenueView, withBackendEarnings, fetchBackendEarnings, getDemoPrivateBalance } from "../kickback/revenue"
-import { getClient } from "../kickback/backend"
+import { buildRevenueView, fetchBackendEarnings } from "../kickback/revenue"
+import { getClient, isConfigured } from "../kickback/backend"
 import type { Earnings } from "@kickback-ai/providers"
 
 // Kickback AI — developer revenue view (`/me`, Task 5).
 //
-// A self-contained overlay dialog (mirrors DialogStatus) so it needs ZERO changes
-// to TUI navigation/routing. Shows the developer's served ad, impressions, clicks,
-// accrued earnings, and settled private balance, read from the ad-store + the mock
-// providers via buildRevenueView(). DISPLAY-ONLY: never enters the LLM context, no
-// live calls (the mock PrivacyProvider is in-memory).
+// A self-contained overlay dialog (mirrors DialogStatus) so it needs ZERO changes to
+// TUI navigation/routing. Shows the developer's served ad, counted impressions, and
+// the REAL accrued earnings read from the Visual Code backend (getEarnings). When no
+// backend is configured it shows a clear "not connected" prompt — never a fabricated
+// balance or ad. DISPLAY-ONLY: nothing here enters the LLM context.
 
 export type DialogMeProps = {}
 
@@ -22,28 +22,23 @@ export function DialogMe() {
   const { theme } = useTheme()
   const dialog = useDialog()
   const [state, setState] = createSignal<AdState>(adStore.getState())
-  const [privateBalance, setPrivateBalance] = createSignal(0n)
   const [backendEarnings, setBackendEarnings] = createSignal<Earnings | undefined>(undefined)
+  // Connection is resolved once at startup (backend.init) and again after /wallet
+  // (backend.reconnect); the dialog is re-created each time it's opened, so reading it
+  // here reflects the current state.
+  const connected = isConfigured()
 
   onMount(() => {
     const unsubscribe = adStore.subscribe(setState)
     onCleanup(unsubscribe)
-    // Prefer the backend's earnings when a Visual Code connection is configured;
-    // fall back to the mock-derived view (offline, no live call) otherwise. Both
-    // paths are best-effort — a failure leaves the mock view in place.
+    // Earnings come from the backend when connected; best-effort — a failure leaves
+    // the figures unloaded (rendered as "—") rather than faking a number.
     fetchBackendEarnings(getClient())
       .then(setBackendEarnings)
       .catch(() => {})
-    getDemoPrivateBalance()
-      .then(setPrivateBalance)
-      .catch(() => {})
   })
 
-  const view = createMemo(() => {
-    const base = buildRevenueView(state(), privateBalance())
-    const earnings = backendEarnings()
-    return earnings ? withBackendEarnings(base, earnings) : base
-  })
+  const view = createMemo(() => buildRevenueView(state(), connected, backendEarnings()))
 
   function openAd(url: string) {
     adStore.recordClick()
@@ -61,74 +56,71 @@ export function DialogMe() {
         </text>
       </box>
 
-      {/* Served ad */}
       <Show
-        when={view().hasAd}
-        fallback={<text fg={theme.textMuted}>No ad is currently served in your status line.</text>}
-      >
-        <box>
-          <text fg={theme.text}>Your ad</text>
-          <box flexDirection="row" gap={1}>
-            <text flexShrink={0} fg={theme.accent}>
-              ◆
-            </text>
-            <text fg={theme.text} wrapMode="word">
-              <b>{view().advertiser}</b> <span style={{ fg: theme.textMuted }}>{view().adText}</span>
-            </text>
-            <text flexShrink={0} fg={theme.accent} onMouseUp={() => openAd(view().adUrl)}>
-              ↗
-            </text>
-          </box>
-        </box>
-      </Show>
-
-      {/* Counters */}
-      <box>
-        <box flexDirection="row" justifyContent="space-between">
-          <text fg={theme.textMuted}>Impressions</text>
-          <text fg={theme.text}>{view().impressions.toString()}</text>
-        </box>
-        <box flexDirection="row" justifyContent="space-between">
-          <text fg={theme.textMuted}>Clicks</text>
-          <text fg={theme.text}>{view().clicks.toString()}</text>
-        </box>
-      </box>
-
-      {/* Money */}
-      <box>
-        <box flexDirection="row" justifyContent="space-between">
-          <text fg={theme.textMuted}>Accrued earnings (50% share)</text>
-          <text fg={theme.success} attributes={TextAttributes.BOLD}>
-            {view().earningsUsdc} USDC
+        when={view().connected}
+        fallback={
+          <text fg={theme.textMuted} wrapMode="word">
+            Not connected to Visual Code. Paste a device token with{" "}
+            <span style={{ fg: theme.text }}>/wallet</span> to see your real earnings.
           </text>
-        </box>
-        <box flexDirection="row" justifyContent="space-between">
-          <text fg={theme.textMuted}>{view().source === "backend" ? "Settled balance" : "Private balance (Unlink)"}</text>
-          <text fg={theme.text}>{view().privateBalanceUsdc} USDC</text>
-        </box>
-        <Show when={view().source === "backend" && view().walletAddress}>
-          <box flexDirection="row" justifyContent="space-between">
-            <text fg={theme.textMuted}>Wallet</text>
-            <text fg={theme.text}>{view().walletAddress}</text>
+        }
+      >
+        {/* Served ad */}
+        <Show
+          when={view().hasAd}
+          fallback={<text fg={theme.textMuted}>No ad is currently served in your status line.</text>}
+        >
+          <box>
+            <text fg={theme.text}>Your ad</text>
+            <box flexDirection="row" gap={1}>
+              <text flexShrink={0} fg="#6676b3">
+                ›
+              </text>
+              <text fg={theme.text} wrapMode="word">
+                <b>{view().advertiser}</b> <span style={{ fg: theme.textMuted }}>{view().adText}</span>
+              </text>
+              <text flexShrink={0} fg={theme.accent} onMouseUp={() => openAd(view().adUrl)}>
+                ↗
+              </text>
+            </box>
           </box>
         </Show>
-      </box>
 
-      {/* Consent + provenance */}
-      <box flexDirection="row" gap={1}>
-        <text
-          flexShrink={0}
-          style={{ fg: view().enabled ? theme.success : theme.textMuted }}
-        >
-          •
-        </text>
-        <text fg={theme.textMuted} wrapMode="word">
-          {view().enabled ? "Ad slot enabled" : "Ad slot disabled"} · display-only ·{" "}
-          {view().source === "backend"
-            ? "earnings from Visual Code backend · settle privately via Unlink"
-            : "mock providers · earnings settle as private Unlink payouts"}
-        </text>
-      </box>
+        {/* Impressions */}
+        <box flexDirection="row" justifyContent="space-between">
+          <text fg={theme.textMuted}>Impressions</text>
+          <text fg={theme.text}>{view().hasEarnings ? view().impressions.toString() : "—"}</text>
+        </box>
+
+        {/* Money */}
+        <box>
+          <box flexDirection="row" justifyContent="space-between">
+            <text fg={theme.textMuted}>Accrued earnings (50% share)</text>
+            <Show when={view().hasEarnings} fallback={<text fg={theme.textMuted}>—</text>}>
+              <text fg={theme.success} attributes={TextAttributes.BOLD}>
+                {view().earningsUsdc} USDC
+              </text>
+            </Show>
+          </box>
+          <Show when={view().walletAddress}>
+            <box flexDirection="row" justifyContent="space-between">
+              <text fg={theme.textMuted}>Wallet</text>
+              <text fg={theme.text}>{view().walletAddress}</text>
+            </box>
+          </Show>
+        </box>
+
+        {/* Consent + provenance */}
+        <box flexDirection="row" gap={1}>
+          <text flexShrink={0} style={{ fg: view().enabled ? theme.success : theme.textMuted }}>
+            •
+          </text>
+          <text fg={theme.textMuted} wrapMode="word">
+            {view().enabled ? "Ad slot enabled" : "Ad slot disabled"} · display-only · earnings from
+            the Visual Code backend · settle privately via Unlink
+          </text>
+        </box>
+      </Show>
     </box>
   )
 }
