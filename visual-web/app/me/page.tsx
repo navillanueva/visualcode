@@ -199,45 +199,48 @@ function WalletAndToken({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, marginBottom: 40 }}>
-      {/* wallet card — sits on top of the token card, kept to a credit-card size */}
+      {/* wallet card — a full-width banner above the token card, sized roughly to
+          the height of the login-command box rather than a tall credit card */}
       <div
         style={{
-          background: "linear-gradient(155deg,#141414 0%,#252525 60%,#4d5a8d 140%)",
+          background: "linear-gradient(105deg,#141414 0%,#252525 55%,#4d5a8d 170%)",
           color: "var(--g-100)",
-          borderRadius: 18,
-          padding: 26,
+          borderRadius: 16,
+          padding: "18px 26px",
           width: "100%",
-          maxWidth: 360,
-          aspectRatio: "1.586 / 1",
           display: "flex",
-          flexDirection: "column",
+          alignItems: "center",
           justifyContent: "space-between",
+          gap: 20,
           position: "relative",
           overflow: "hidden",
           boxShadow: "var(--shadow-wallet)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-          <Logo wordSize={15} cursorW={8} cursorH={15} blink={false} />
-          <span className="mono" style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(253,253,253,0.6)" }}>
-            non-custodial
-          </span>
-        </div>
-        <div>
+        {/* left: brand + address */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Logo wordSize={15} cursorW={8} cursorH={15} blink={false} />
+            <span className="mono" style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(253,253,253,0.6)" }}>
+              non-custodial
+            </span>
+          </div>
           <div className="mono" style={{ fontSize: 16, letterSpacing: "0.06em", color: "var(--g-400)" }}>
             {shortAddr}
           </div>
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: 12 }}>
-            <div>
-              <div style={{ fontSize: 11, color: "rgba(253,253,253,0.6)" }}>balance</div>
-              <div className="mono" style={{ fontSize: 20, marginTop: 2 }}>
-                {formatUsd(balanceBaseUnits, decimals)}
-              </div>
+        </div>
+
+        {/* right: balance + network */}
+        <div style={{ display: "flex", alignItems: "center", gap: 18, flexShrink: 0 }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 11, color: "rgba(253,253,253,0.6)" }}>balance</div>
+            <div className="mono" style={{ fontSize: 20, marginTop: 2 }}>
+              {formatUsd(balanceBaseUnits, decimals)}
             </div>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 22, padding: "0 9px", borderRadius: 8, background: "rgba(155,224,85,0.16)", color: "var(--earn)", fontSize: 11, fontWeight: 500 }}>
-              ● Arc
-            </span>
           </div>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 22, padding: "0 9px", borderRadius: 8, background: "rgba(155,224,85,0.16)", color: "var(--earn)", fontSize: 11, fontWeight: 500 }}>
+            ● Arc
+          </span>
         </div>
       </div>
 
