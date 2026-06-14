@@ -14,7 +14,7 @@ export interface Campaign {
   advertiser: string
   text: string
   url: string
-  /** Advertiser logo URL (http(s) or root-relative like /ads/dynamic.png). */
+  /** Advertiser logo: an uploaded image (base64 data URL) or an http(s)/root-relative URL. */
   logoUrl?: string
   bidBaseUnits: string
   /** Original funded budget (what must be paid to fund). */
@@ -154,18 +154,20 @@ export function withdraw(): Promise<{ ok: boolean; txRef?: string | null }> {
 // --- World ID personhood (Plan 5) -----------------------------------------
 
 /**
- * The IDKit success payload, forwarded to the backend verbatim. Structurally
- * matches `ISuccessResult` from `@worldcoin/idkit` (classic widget), so the
- * component can hand the proof straight through without re-shaping it.
+ * Signed rp-context the World ID 4.0 IDKit widget needs to open. Comes from
+ * POST /api/me/world-rp-context; structurally matches idkit's `RpContext`.
  */
-export interface WorldIdProof {
-  proof: string
-  merkle_root: string
-  nullifier_hash: string
-  verification_level: string
-  /** The action the proof was generated for. The backend verifies against this exact
-   *  action, so it MUST match the IDKit widget's `action` (else the proof is invalid). */
-  action: string
+export interface WorldRpContext {
+  rp_id: string
+  nonce: string
+  created_at: number
+  expires_at: number
+  signature: string
+}
+
+/** Fetch a fresh signed rp-context (the v4 widget refuses to open without one). */
+export async function getWorldRpContext(): Promise<WorldRpContext> {
+  return request<WorldRpContext>("/api/me/world-rp-context", { method: "POST" })
 }
 
 /** Outcome of POST /api/me/verify-human. `error` is the backend's machine code. */
@@ -176,18 +178,17 @@ export interface VerifyHumanResult {
 }
 
 /**
- * Link a World ID proof to the logged-in account (the anti-Sybil personhood
- * gate). Authenticates with the same Bearer session token as every other authed
- * call. The backend's error states (409 already_linked / 400 verification_failed
- * / 503 worldid_not_configured) arrive as non-2xx responses; we decode the
- * `{error}` body and return it so callers can show friendly messaging instead of
- * a raw throw. Non-API failures (network) still surface as a thrown ApiError.
+ * Link a World ID 4.0 proof to the logged-in account (the anti-Sybil personhood
+ * gate). Forwards the IDKit result verbatim; the backend verifies it against the v4
+ * endpoint and binds the nullifier. Backend error states (409 already_linked / 400
+ * verification_failed / 503 worldid_not_configured) arrive as non-2xx with a
+ * `{error}` body we decode for friendly messaging; network failures still throw.
  */
-export async function verifyHuman(payload: WorldIdProof): Promise<VerifyHumanResult> {
+export async function verifyHuman(input: { rp_id: string; idkitResponse: unknown }): Promise<VerifyHumanResult> {
   try {
     return await request<VerifyHumanResult>("/api/me/verify-human", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(input),
     })
   } catch (e) {
     // The contract's failure responses carry a JSON `{ok:false,error}` body.
@@ -209,7 +210,7 @@ export interface CreateCampaignInput {
   advertiser: string
   text: string
   url: string
-  /** Optional advertiser logo URL (http(s) or root-relative). */
+  /** Optional advertiser logo: uploaded image (base64 data URL) or http(s)/root-relative URL. */
   logoUrl?: string
   /** USDC base units (string). Use money.ts `toBaseUnits` to build these. */
   bidBaseUnits: string

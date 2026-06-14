@@ -21,6 +21,11 @@ const FIXED_PRICE_LABEL = "$10 per 1,000 views"
 
 const EMPTY = { advertiser: "", text: "", url: "", logo: "", budget: "" }
 
+// Uploaded logo limits — mirror the backend (raster only, ≤200KB). The image is
+// read into a base64 data URL and stored inline on the campaign (logo_url).
+const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"]
+const MAX_LOGO_BYTES = 200 * 1024
+
 export default function AdvertisePage() {
   const { me, isLoggedIn, refresh } = useMe()
   const { primaryWallet, setShowAuthFlow } = useDynamicContext()
@@ -56,6 +61,36 @@ export default function AdvertisePage() {
 
   function set<K extends keyof typeof form>(key: K, value: string) {
     setForm((f) => ({ ...f, [key]: value }))
+  }
+
+  // Read the chosen image into a base64 data URL and park it in `form.logo`, so
+  // the existing preview + createCampaign(logoUrl) path is unchanged — only the
+  // input swaps from a URL field to a file picker. Validates type + size first.
+  async function onLogoFile(file: File | null) {
+    if (!file) {
+      set("logo", "")
+      return
+    }
+    if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
+      setError("Logo must be a PNG, JPG, WebP, or GIF image.")
+      return
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      setError(`Logo is too large (${Math.round(file.size / 1024)}KB) — max 200KB.`)
+      return
+    }
+    setError(null)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(reader.error ?? new Error("Could not read the image file."))
+        reader.readAsDataURL(file)
+      })
+      set("logo", dataUrl)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   // Real on-chain pay → fund: public USDC transfer to the treasury (advertiser
@@ -306,17 +341,26 @@ export default function AdvertisePage() {
               </div>
               <div className="field">
                 <label className="field__label field__label--row" htmlFor="adv-logo">
-                  <span>Logo URL</span>
-                  <span className="field__hint">optional · square image</span>
+                  <span>Logo</span>
+                  <span className="field__hint">optional · square · PNG/JPG/WebP/GIF ≤ 200KB</span>
                 </label>
                 <input
                   id="adv-logo"
-                  className="input input--mono"
-                  placeholder="https://acme.dev/logo.png"
-                  value={form.logo}
-                  onChange={(e) => set("logo", e.target.value)}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="input"
+                  onChange={(e) => void onLogoFile(e.target.files?.[0] ?? null)}
                   disabled={locked}
                 />
+                {form.logo ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element -- user-uploaded data URL preview */}
+                    <img src={form.logo} alt="" style={{ width: 36, height: 36, borderRadius: 6, objectFit: "cover" }} />
+                    <button type="button" className="linkbtn" onClick={() => set("logo", "")} disabled={locked}>
+                      Remove
+                    </button>
+                  </div>
+                ) : null}
               </div>
               <div className="field">
                 <label className="field__label" htmlFor="adv-budget">

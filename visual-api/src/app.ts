@@ -23,7 +23,7 @@ import { toBaseUnits, USDC_DECIMALS } from "@kickback/money"
 import { encryptSecret } from "./auth/crypto"
 import { SESSION_COOKIE, signSession, verifySession } from "./auth/session"
 import type { DynamicVerifier } from "./auth/dynamic"
-import { type WorldIdVerifier, WorldIdVerifyError } from "./auth/world-id"
+import { type WorldIdVerifier, type RpContext, WorldIdVerifyError } from "./auth/world-id"
 import type { SettlementService } from "./settlement/service"
 
 export interface AppDeps {
@@ -35,11 +35,12 @@ export interface AppDeps {
   /** Allowed browser origins; null = reflect request origin (dev). */
   corsOrigins: string[] | null
   /**
-   * World ID personhood gate. `appId` set ⇒ the verify-human endpoint + gates are
-   * live; unset ⇒ verify-human returns 503 and the gates are no-ops (mock/dev).
-   * `verifier` performs the server-side proof validation (the bounty requirement).
+   * World ID 4.0 personhood gate. `appId` set ⇒ the gates are live; unset ⇒
+   * verify-human returns 503 and the gates are no-ops (mock/dev). `verifier` runs the
+   * server-side v4 proof validation; `signContext` mints a signed rp-context for the
+   * IDKit widget (both undefined unless the RP id + signing key are configured).
    */
-  worldId?: { appId?: string; verifier?: WorldIdVerifier }
+  worldId?: { appId?: string; verifier?: WorldIdVerifier; signContext?: () => RpContext }
   /** Public web app base URL, surfaced in earnings so the TUI can link to verify. */
   webAppUrl?: string
   /**
@@ -68,6 +69,11 @@ type Vars = { Variables: { accountId: string } }
 
 const PRIVATE_KEY_RE = /^0x[0-9a-fA-F]{64}$/
 const BASE_UNITS_RE = /^\d+$/
+// Inline uploaded logos arrive as base64 data URLs. Raster types only — svg+xml
+// can carry <script>, a stored-XSS vector when the web renders it in <img>.
+const DATA_IMAGE_RE = /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/
+// Cap an inline logo: 200KB of image ≈ 273KB of base64; allow a little headroom.
+const MAX_LOGO_URL_LEN = 300_000
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -77,8 +83,10 @@ function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined
 }
 
-/** Accept only http(s) absolute URLs or root-relative paths for advertiser logos. */
+/** Accept an uploaded image (base64 data URL), an http(s) absolute URL, or a
+ *  root-relative path for advertiser logos. */
 function isSafeLogoUrl(v: string): boolean {
+  if (v.startsWith("data:")) return DATA_IMAGE_RE.test(v)
   if (v.startsWith("/") && !v.startsWith("//")) return true
   try {
     const proto = new URL(v).protocol
@@ -251,11 +259,15 @@ export function createApp(deps: AppDeps) {
         400,
       )
     }
-    // Optional advertiser logo. Restricted to http(s) or root-relative URLs so a
-    // crafted value can't smuggle a javascript:/data: payload into the <img src>.
+    // Optional advertiser logo: an uploaded image (base64 data URL), or an
+    // http(s)/root-relative URL. Raster data URLs only + a size cap so a crafted
+    // value can't smuggle a script payload or bloat the row / ad-serve response.
     const rawLogo = asString(body?.["logoUrl"])
+    if (rawLogo && rawLogo.length > MAX_LOGO_URL_LEN) {
+      return c.json({ ok: false, error: "logo image too large (max ~200KB)" }, 413)
+    }
     if (rawLogo && !isSafeLogoUrl(rawLogo)) {
-      return c.json({ ok: false, error: "logoUrl must be an http(s) or root-relative URL" }, 400)
+      return c.json({ ok: false, error: "logoUrl must be an uploaded image or an http(s)/root-relative URL" }, 400)
     }
     // Pricing is fixed platform-wide ($10/1,000 views): the bid is set server-side
     // so clients can't under- or over-bid; only the budget is theirs to control.
@@ -383,15 +395,27 @@ export function createApp(deps: AppDeps) {
   // nullifier to the session account (the personhood gate, validated server-side).
   // 200 {ok,worldIdVerified} · 409 already_linked (nullifier on another account —
   // the anti-Sybil block) · 400 verification_failed · 503 worldid_not_configured.
+  // CONTRACT: POST /api/me/world-rp-context → signed rp-context for the IDKit widget.
+  // The widget can't open without it; the RP signing key never leaves the server.
+  // 200 { rp_id, nonce, created_at, expires_at, signature } · 503 worldid_not_configured.
+  app.post("/api/me/world-rp-context", sessionAuth, async (c) => {
+    const signContext = deps.worldId?.signContext
+    if (!signContext) return c.json({ ok: false, error: "worldid_not_configured" }, 503)
+    return c.json(signContext())
+  })
+
   app.post("/api/me/verify-human", sessionAuth, async (c) => {
     const verifier = deps.worldId?.verifier
     if (!deps.worldId?.appId || !verifier) {
       return c.json({ ok: false, error: "worldid_not_configured" }, 503)
     }
-    const payload = await c.req.json().catch(() => null)
+    // Body: { rp_id, idkitResponse }. We verify the IDKit result; rp_id is the
+    // verifier's own (configured) value, so a client-sent rp_id can't redirect us.
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null
+    const idkitResponse = body?.["idkitResponse"] ?? body
     let nullifierHash: string
     try {
-      ;({ nullifierHash } = await verifier.verify(payload))
+      ;({ nullifierHash } = await verifier.verify(idkitResponse))
     } catch (e) {
       // World's error CODE is safe to surface (e.g. max_verifications_reached,
       // invalid_proof) — it explains the failure without exposing proof material.
