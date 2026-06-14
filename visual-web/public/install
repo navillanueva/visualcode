@@ -14,6 +14,8 @@ REPO=navillanueva/visualcode
 MUTED='\033[0;2m'
 RED='\033[0;31m'
 INDIGO='\033[38;5;63m'
+GREEN='\033[0;32m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 usage() {
@@ -146,23 +148,33 @@ chmod 755 "$INSTALL_DIR/$BINARY"
 add_to_path() {
     local config_file=$1 line=$2
     if grep -Fxq "$line" "$config_file" 2>/dev/null; then
-        :
+        :  # already there
     elif [[ -w "$config_file" || ! -e "$config_file" ]]; then
         printf '\n# blurbcode\n%s\n' "$line" >> "$config_file"
-        echo -e "${MUTED}Added BlurbCode to \$PATH in ${NC}$config_file"
     else
-        echo -e "${MUTED}Add this to your shell config manually:${NC}"
-        echo -e "  $line"
+        echo -e "${MUTED}Couldn't write $config_file — add this line manually: $line${NC}"
     fi
 }
 
-if [[ "$no_modify_path" != "true" && ":$PATH:" != *":$INSTALL_DIR:"* ]]; then
+# Is the install dir already visible to THIS shell? (true on a reinstall, or if the
+# user already had it on PATH). If so, `blurbcode` works immediately; if not, the new
+# PATH line we just wrote won't apply until the current shell reloads its config.
+on_path=false
+case ":$PATH:" in *":$INSTALL_DIR:"*) on_path=true ;; esac
+
+shell_config=""
+reload_cmd=""
+if [[ "$no_modify_path" != "true" && "$on_path" != "true" ]]; then
     current_shell=$(basename "${SHELL:-bash}")
     case "$current_shell" in
-        fish) add_to_path "$HOME/.config/fish/config.fish" "fish_add_path $INSTALL_DIR" ;;
-        zsh)  add_to_path "${ZDOTDIR:-$HOME}/.zshrc" "export PATH=$INSTALL_DIR:\$PATH" ;;
-        *)    add_to_path "$HOME/.bashrc" "export PATH=$INSTALL_DIR:\$PATH" ;;
+        fish) shell_config="$HOME/.config/fish/config.fish"
+              add_to_path "$shell_config" "fish_add_path $INSTALL_DIR" ;;
+        zsh)  shell_config="${ZDOTDIR:-$HOME}/.zshrc"
+              add_to_path "$shell_config" "export PATH=$INSTALL_DIR:\$PATH" ;;
+        *)    shell_config="$HOME/.bashrc"
+              add_to_path "$shell_config" "export PATH=$INSTALL_DIR:\$PATH" ;;
     esac
+    [ -n "$shell_config" ] && reload_cmd="source ${shell_config/#$HOME/~}"
 fi
 
 if [ -n "${GITHUB_ACTIONS:-}" ] && [ "${GITHUB_ACTIONS}" = "true" ]; then
@@ -171,14 +183,36 @@ fi
 
 # --- done --------------------------------------------------------------------
 echo -e ""
-echo -e "${INDIGO}  ›${NC} BlurbCode installed."
+echo -e "${GREEN}${BOLD}  ✓ BlurbCode ${specific_version} installed.${NC}"
+echo -e "${MUTED}    Get paid while your agent works — you keep half of every impression.${NC}"
 echo -e ""
-echo -e "${MUTED}Get paid while your agent works — you keep half of every impression.${NC}"
+
+if [ "$on_path" = "true" ]; then
+    # Already on PATH for this shell — runnable right now.
+    echo -e "${BOLD}Start coding:${NC}"
+    echo -e "  cd <project>   ${MUTED}# open your project${NC}"
+    echo -e "  ${GREEN}$BINARY${NC}        ${MUTED}# launch, then run /wallet to link your earnings${NC}"
+else
+    # PATH was just updated on disk but THIS shell hasn't loaded it yet. This is the
+    # #1 source of "command not found" — so make the one required step impossible to miss.
+    echo -e "${BOLD}${INDIGO}Almost there — one step left.${NC}"
+    echo -e "${MUTED}'$BINARY' is installed, but typing it won't work in ${BOLD}this${NC}${MUTED} terminal until it"
+    echo -e "reloads its PATH. (A script can't change the shell that launched it — every"
+    echo -e "installer has this step.) Pick one:${NC}"
+    echo -e ""
+    if [ -n "$reload_cmd" ]; then
+        echo -e "  ${BOLD}A.${NC} Reload this terminal now:"
+        echo -e "       ${GREEN}${BOLD}${reload_cmd}${NC}"
+    else
+        echo -e "  ${BOLD}A.${NC} Add this to your shell config, then reopen your terminal:"
+        echo -e "       ${GREEN}${BOLD}export PATH=$INSTALL_DIR:\$PATH${NC}"
+    fi
+    echo -e "  ${BOLD}B.${NC} ${MUTED}…or just open a new terminal tab/window.${NC}"
+    echo -e ""
+    echo -e "${BOLD}Then start coding:${NC}"
+    echo -e "  cd <project>   ${MUTED}# open your project${NC}"
+    echo -e "  ${GREEN}$BINARY${NC}        ${MUTED}# launch, then run /wallet to link your earnings${NC}"
+fi
 echo -e ""
-echo -e "  cd <project>     ${MUTED}# open a project${NC}"
-echo -e "  $BINARY          ${MUTED}# start coding${NC}"
-echo -e "  $BINARY then run ${MUTED}/wallet${NC} ${MUTED}to link your earnings${NC}"
-echo -e ""
-echo -e "${MUTED}Open a new terminal (or 'source' your shell config) so '$BINARY' is on your PATH.${NC}"
 echo -e "${MUTED}Docs: ${NC}https://blurbcode.xyz"
 echo -e ""
