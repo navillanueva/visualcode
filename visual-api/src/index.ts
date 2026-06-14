@@ -35,6 +35,9 @@ const app = createApp({
   secureCookies: config.secureCookies,
   corsOrigins: config.corsOrigins,
   treasury,
+  // Fixed-price bid uses the deployment's USDC decimals (ARC_USDC_DECIMALS); the
+  // app defaults to USDC_DECIMALS when arc isn't configured (mock/dev).
+  usdcDecimals: kb.arc?.usdc.decimals,
 })
 
 console.log(`visual-api listening on :${config.port} (settlement=${settlement.mode})`)

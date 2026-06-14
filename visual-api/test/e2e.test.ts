@@ -47,7 +47,7 @@ describe("full money loop (mock providers)", () => {
           advertiser: "Acme",
           text: "Acme builds widgets — try it",
           url: "https://acme.test",
-          bidBaseUnits: "1000000", // 1 USDC per 1,000 impressions
+          bidBaseUnits: "1000000", // ignored — pricing is fixed server-side at $10/1,000
           budgetBaseUnits: "10000000", // 10 USDC
         },
         { cookie: advCookie },
@@ -116,8 +116,8 @@ describe("full money loop (mock providers)", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { ok: boolean; creditedBaseUnits: string }
     expect(body.ok).toBe(true)
-    // charge = floor(1,000,000 * 120 / 1,000) = 120,000; dev gets 50% = 60,000.
-    expect(body.creditedBaseUnits).toBe("60000")
+    // Fixed bid 10,000,000 ($10/1,000): charge = floor(10,000,000 * 120 / 1,000) = 1,200,000; dev 50% = 600,000.
+    expect(body.creditedBaseUnits).toBe("600000")
     expect(/^\d+$/.test(body.creditedBaseUnits)).toBe(true) // integer base-units string (TUI client contract)
   })
 
@@ -129,7 +129,7 @@ describe("full money loop (mock providers)", () => {
       clicks: number
       walletAddress: string
     }
-    expect(body.balanceBaseUnits).toBe("60000")
+    expect(body.balanceBaseUnits).toBe("600000")
     expect(body.impressions).toBe(120)
     expect(body.clicks).toBe(0)
     expect(body.walletAddress).toBe(DEV)
@@ -141,15 +141,15 @@ describe("full money loop (mock providers)", () => {
       campaigns: { id: string; budgetRemainingBaseUnits: string; spendBaseUnits: string }[]
     }
     const c = body.campaigns.find((x) => x.id === campaignId)
-    expect(c?.budgetRemainingBaseUnits).toBe("9880000")
-    expect(c?.spendBaseUnits).toBe("120000")
+    expect(c?.budgetRemainingBaseUnits).toBe("8800000")
+    expect(c?.spendBaseUnits).toBe("1200000")
   })
 
   test("GET /api/me reports balance + role for the developer", async () => {
     const res = await h.app.request("/api/me", { headers: { cookie: devCookie } })
     const body = (await res.json()) as { address: string; balanceBaseUnits: string; role: string }
     expect(body.address).toBe(DEV)
-    expect(body.balanceBaseUnits).toBe("60000")
+    expect(body.balanceBaseUnits).toBe("600000")
     expect(body.role).toBe("developer")
   })
 
@@ -158,7 +158,7 @@ describe("full money loop (mock providers)", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { ok: boolean; withdrawnBaseUnits: string; txRef: string }
     expect(body.ok).toBe(true)
-    expect(body.withdrawnBaseUnits).toBe("60000")
+    expect(body.withdrawnBaseUnits).toBe("600000")
     expect(body.txRef).toMatch(/^mock-withdraw:/)
 
     const after = await h.app.request("/api/me/earnings", { headers: { Authorization: `Bearer ${deviceToken}` } })

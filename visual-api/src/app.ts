@@ -18,6 +18,8 @@ import type { Database } from "./db/index"
 import * as repo from "./db/repo"
 import { selectWinner } from "./auction"
 import { allowedImpressionCount, RATE_WINDOW_MS } from "./ratelimit"
+import { computeImpressionCharge } from "./accounting"
+import { toBaseUnits, USDC_DECIMALS } from "@kickback/money"
 import { encryptSecret } from "./auth/crypto"
 import { SESSION_COOKIE, signSession, verifySession } from "./auth/session"
 import type { DynamicVerifier } from "./auth/dynamic"
@@ -39,6 +41,11 @@ export interface AppDeps {
   treasury: TreasuryInfo | null
   /** Injected clock (tests pass a fixed value); defaults to Date.now. */
   now?: () => number
+  /**
+   * USDC base-unit decimals for fixed pricing (ARC_USDC_DECIMALS): 6dp on
+   * mainnet, 18dp for the arc-testnet pool token. Defaults to USDC_DECIMALS.
+   */
+  usdcDecimals?: number
 }
 
 export interface TreasuryInfo {
@@ -67,8 +74,18 @@ function parseBaseUnits(v: unknown): bigint | undefined {
   return BigInt(v)
 }
 
+/** Clamp the ?limit= query for list endpoints to [1, 200], defaulting to 50. */
+function parseLimit(raw: string | undefined): number {
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n <= 0) return 50
+  return Math.min(Math.floor(n), 200)
+}
+
 export function createApp(deps: AppDeps) {
   const now = deps.now ?? (() => Date.now())
+  // Fixed pricing: every campaign bids $10 per 1,000 views, in the deployment's
+  // USDC base units (ARC_USDC_DECIMALS — 6dp mainnet, 18dp arc-testnet pool token).
+  const FIXED_BID_BASE_UNITS = toBaseUnits("10", deps.usdcDecimals ?? USDC_DECIMALS)
   const app = new Hono<Vars>()
 
   app.use(
@@ -191,27 +208,28 @@ export function createApp(deps: AppDeps) {
     return c.json({ token })
   })
 
-  // CONTRACT: POST /api/campaigns { advertiser, text, url, bidBaseUnits, budgetBaseUnits } → { campaign }
+  // CONTRACT: POST /api/campaigns { advertiser, text, url, budgetBaseUnits } → { campaign }
+  // (bid is fixed server-side at $10/1,000 views; any client-sent bid is ignored.)
   app.post("/api/campaigns", sessionAuth, async (c) => {
     const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null
     const advertiser = asString(body?.["advertiser"])
     const text = asString(body?.["text"])
     const url = asString(body?.["url"])
-    const bid = parseBaseUnits(body?.["bidBaseUnits"])
     const budget = parseBaseUnits(body?.["budgetBaseUnits"])
-    if (!advertiser || !text || !url || bid === undefined || budget === undefined) {
+    if (!advertiser || !text || !url || budget === undefined) {
       return c.json(
-        { ok: false, error: "advertiser, text, url, bidBaseUnits, budgetBaseUnits (base-unit strings) are required" },
+        { ok: false, error: "advertiser, text, url, budgetBaseUnits (base-unit string) are required" },
         400,
       )
     }
-    if (bid <= 0n) return c.json({ ok: false, error: "bidBaseUnits must be positive" }, 400)
+    // Pricing is fixed platform-wide ($10/1,000 views): the bid is set server-side
+    // so clients can't under- or over-bid; only the budget is theirs to control.
     const campaign = await repo.createCampaign(deps.db, {
       advertiserAccountId: c.get("accountId"),
       advertiser,
       text,
       url,
-      bidBaseUnits: bid,
+      bidBaseUnits: FIXED_BID_BASE_UNITS,
       budgetBaseUnits: budget,
     })
     return c.json({ campaign })
@@ -288,6 +306,35 @@ export function createApp(deps: AppDeps) {
     const { balanceBaseUnits } = await repo.getEarnings(deps.db, accountId)
     const role = await repo.accountRole(deps.db, accountId)
     return c.json({ address: account?.address ?? "", balanceBaseUnits: balanceBaseUnits.toString(), role })
+  })
+
+  // CONTRACT: GET /api/me/impressions?limit=N (default 50, max 200) → the session
+  // developer's own impression ledger, newest first, each row joined to its
+  // campaign with the dev's 50% credit for that batch at the campaign's bid.
+  app.get("/api/me/impressions", sessionAuth, async (c) => {
+    const accountId = c.get("accountId")
+    const limit = parseLimit(c.req.query("limit"))
+    const rows = await repo.listImpressionsByDev(deps.db, accountId, limit)
+    const impressions = rows.map((r) => {
+      const bidBaseUnits = BigInt(r.bidBaseUnits)
+      // Reuse the canonical accounting math. budgetRemaining is bid*count (always
+      // ≥ the floor(bid*count/1000) charge), so the credit shown is this row's full
+      // nominal 50% — never clamped by a budget that later exhausted.
+      const { devCredit } = computeImpressionCharge({
+        bidBaseUnits,
+        budgetRemaining: bidBaseUnits * BigInt(r.count),
+        count: r.count,
+      })
+      return {
+        campaignId: r.campaignId,
+        advertiser: r.advertiser,
+        text: r.text,
+        count: r.count,
+        creditedBaseUnits: devCredit.toString(),
+        createdAt: r.createdAt.toISOString(),
+      }
+    })
+    return c.json({ impressions })
   })
 
   // CONTRACT: POST /api/withdraw → settle earnings to the account's wallet

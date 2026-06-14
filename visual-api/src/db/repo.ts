@@ -4,7 +4,7 @@
 // (tests). USDC amounts are bigint base units in code; `numeric` columns
 // serialize them as integer strings (the contract wire shape).
 
-import { and, eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import type { Database } from "./index"
 import { accounts, campaigns, deviceTokens, earnings, impressions, settlements } from "./schema"
 import { computeImpressionCharge } from "../accounting"
@@ -175,6 +175,39 @@ export async function activeAuctionCandidates(db: Database): Promise<AuctionCand
     status: r.status,
     createdAt: r.createdAt,
   }))
+}
+
+export interface DevImpressionRow {
+  campaignId: string
+  advertiser: string
+  text: string
+  /** Campaign bid (base units per 1,000 impressions) — lets the caller recompute the credit. */
+  bidBaseUnits: string
+  count: number
+  createdAt: Date
+}
+
+/** A developer's own impression rows, newest first, joined to their campaign
+ *  (advertiser + text for display, bid so the caller recomputes the 50% credit). */
+export async function listImpressionsByDev(
+  db: Database,
+  devAccountId: string,
+  limit: number,
+): Promise<DevImpressionRow[]> {
+  return db
+    .select({
+      campaignId: impressions.campaignId,
+      advertiser: campaigns.advertiser,
+      text: campaigns.text,
+      bidBaseUnits: campaigns.bidBaseUnits,
+      count: impressions.count,
+      createdAt: impressions.createdAt,
+    })
+    .from(impressions)
+    .innerJoin(campaigns, eq(impressions.campaignId, campaigns.id))
+    .where(eq(impressions.devAccountId, devAccountId))
+    .orderBy(desc(impressions.createdAt))
+    .limit(limit)
 }
 
 /** Sum of impression counts credited to an account since `since`. */

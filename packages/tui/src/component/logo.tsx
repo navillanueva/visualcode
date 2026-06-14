@@ -857,13 +857,14 @@ export function Logo(props: { shape?: LogoShape; ink?: RGBA; idle?: boolean } = 
         {(line, index) => (
           <box flexDirection="row" gap={1}>
             <box flexDirection="row">
-              {renderLine(line, index(), props.ink ?? theme.textMuted, !!props.ink, 0, frame(), dusk(), idleState())}
+              {/* Brand wordmark: first half ("blurb") strong + bold, second half ("code") muted. */}
+              {renderLine(line, index(), props.ink ?? theme.text, true, 0, frame(), dusk(), idleState())}
             </box>
             <box flexDirection="row">
               {renderLine(
                 ctx.shape.right[index()],
                 index(),
-                props.ink ?? theme.text,
+                props.ink ?? theme.textMuted,
                 true,
                 ctx.LEFT + GAP,
                 frame(),
