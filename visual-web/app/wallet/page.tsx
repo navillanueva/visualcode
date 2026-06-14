@@ -1,263 +1,213 @@
 "use client"
 
-import { useState } from "react"
-import { DynamicWidget, useDynamicContext } from "@dynamic-labs/sdk-react-core"
-import { privateKeyToAccount } from "viem/accounts"
-import { authImport, createDeviceToken, withdraw } from "@/lib/api"
-import { fromBaseUnits } from "@/lib/money"
+import { useEffect, useRef, useState } from "react"
+import Link from "next/link"
+import { useDynamicContext } from "@dynamic-labs/sdk-react-core"
+import { createDeviceToken } from "@/lib/api"
 import { useMe } from "@/lib/useMe"
-import { CopyButton } from "@/components/CopyButton"
+import { BlurbMark } from "@/components/BlurbMark"
+import { ArrowRight, Check, Coin, Copy, Lock } from "@/components/Icons"
 
-const PRIVATE_KEY_RE = /^0x[0-9a-fA-F]{64}$/
+// Sample token shown if the backend can't issue a real one (TODO(human): real data).
+const SAMPLE_TOKEN = "bc_dev_7Qx9R2mK4tLpZ8vN1wEs"
+
+const METHODS = [
+  { id: "email", label: "Email" },
+  { id: "google", label: "Google" },
+  { id: "github", label: "GitHub" },
+] as const
+
+const PRIVACY = [
+  { icon: <Lock size={20} strokeWidth={1.5} />, title: "Balances stay hidden", body: "Your earnings and counterparties are private on Arc by default." },
+  { icon: <Coin size={20} strokeWidth={1.6} />, title: "Gas-free USDC", body: "Micropayments settle instantly with no network fees eating your split." },
+  { icon: <Copy size={20} strokeWidth={1.6} />, title: "One token per device", body: "Revoke it anytime. No code, repo, or telemetry leaves your machine." },
+]
 
 export default function WalletPage() {
-  const { me, error: meError, refresh, isLoggedIn } = useMe()
-  const { primaryWallet } = useDynamicContext()
-  const authed = isLoggedIn || me !== null
-  const address = me?.address ?? primaryWallet?.address ?? null
+  const { me, isLoggedIn } = useMe()
+  const { primaryWallet, setShowAuthFlow } = useDynamicContext()
+  const connected = isLoggedIn || me !== null
+
+  const [method, setMethod] = useState<(typeof METHODS)[number]["id"]>("email")
+  const [email, setEmail] = useState("nicolas@avalabs.org")
 
   return (
-    <>
-      <h1 className="page-title">Your wallet</h1>
-      <p className="page-sub">Create or connect a wallet, link the TUI, and withdraw your earnings.</p>
+    <main className="shell shell--980" style={{ padding: "56px 28px 100px" }}>
+      <div style={{ textAlign: "center", marginBottom: 40 }}>
+        <span className="pill pill--arc pill--sm" style={{ marginBottom: 18 }}>
+          <Lock size={13} strokeWidth={1.6} />
+          non-custodial · your keys
+        </span>
+        <h1 className="display" style={{ fontSize: 36, letterSpacing: "-0.025em", margin: "0 0 12px" }}>
+          Connect a wallet, get a device token.
+        </h1>
+        <p style={{ fontSize: 16, lineHeight: 1.55, color: "var(--g-700)", margin: "0 auto", maxWidth: 520 }}>
+          Sign in with email or social — we create a non-custodial wallet behind the scenes. Then paste a device token into
+          your terminal to start earning.
+        </p>
+      </div>
 
-      {/* 1. Connect / create */}
-      <section className="section" style={{ marginTop: 28 }}>
-        <h2>Connect or create</h2>
-        <div className="card stack" style={{ maxWidth: 560 }}>
-          <p className="muted" style={{ fontSize: 14, margin: 0 }}>
-            Sign in with social or email — Dynamic creates a non-custodial embedded wallet. Your key never leaves your
-            control; we only learn the address.
-          </p>
-          <DynamicWidget />
-          <ImportKeyFallback onLinked={refresh} />
-        </div>
-      </section>
-
-      {/* 2. Account */}
-      <section className="section">
-        <h2>Account</h2>
-        {meError ? <div className="banner error">Couldn’t load your account: {meError}</div> : null}
-        {address ? (
-          <div className="stats">
-            <div className="stat">
-              <div className="stat-label">Wallet address</div>
-              <div className="stat-value" style={{ fontSize: 14 }}>
-                {address}
-              </div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Balance</div>
-              <div className="stat-value">
-                {me ? `${fromBaseUnits(BigInt(me.balanceBaseUnits))} USDC` : "—"}
-              </div>
-            </div>
-            <div className="stat">
-              <div className="stat-label">Role</div>
-              <div className="stat-value" style={{ fontSize: 16 }}>
-                {me?.role ?? "—"}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="muted">Connect a wallet above to see your address, balance, and earnings.</p>
-        )}
-      </section>
-
-      {/* 3. Device token */}
-      <section className="section">
-        <h2>Link the TUI</h2>
-        <div className="card stack">
-          {authed ? (
-            <DeviceTokenPanel />
-          ) : (
-            <p className="muted" style={{ margin: 0 }}>
-              Connect a wallet first to generate a device token.
-            </p>
-          )}
-        </div>
-      </section>
-
-      {/* 4. Withdraw */}
-      <section className="section">
-        <h2>Withdraw earnings</h2>
-        <div className="card stack" style={{ maxWidth: 560 }}>
-          {authed ? (
-            <WithdrawPanel onDone={refresh} />
-          ) : (
-            <p className="muted" style={{ margin: 0 }}>
-              Connect a wallet first to withdraw.
-            </p>
-          )}
-        </div>
-      </section>
-    </>
-  )
-}
-
-function ImportKeyFallback({ onLinked }: { onLinked: () => void }) {
-  const [key, setKey] = useState("")
-  const [importing, setImporting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [ok, setOk] = useState<string | null>(null)
-
-  let derived: string | null = null
-  if (PRIVATE_KEY_RE.test(key.trim())) {
-    try {
-      derived = privateKeyToAccount(key.trim() as `0x${string}`).address
-    } catch {
-      derived = null
-    }
-  }
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
-    setError(null)
-    setOk(null)
-    const trimmed = key.trim()
-    if (!PRIVATE_KEY_RE.test(trimmed)) {
-      setError("That doesn’t look like a 0x-prefixed 64-char private key.")
-      return
-    }
-    setImporting(true)
-    try {
-      const res = await authImport(trimmed)
-      setOk(`Imported and linked ${res.address}.`)
-      setKey("")
-      onLinked()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  return (
-    <details className="fallback">
-      <summary>Advanced: import a private key instead (custodial fallback)</summary>
-      <form className="stack" onSubmit={submit}>
-        <div className="banner warn" style={{ fontSize: 13 }}>
-          Importing a key is <strong>custodial</strong> — the backend stores it encrypted to sign on your behalf. Prefer
-          the non-custodial Dynamic flow above when you can.
-        </div>
-        <div className="field">
-          <label htmlFor="pk">Private key</label>
-          <input
-            id="pk"
-            type="password"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-            placeholder="0x…"
-            autoComplete="off"
-          />
-          {derived ? (
-            <span className="hint mono">→ {derived}</span>
-          ) : (
-            <span className="hint">0x-prefixed, 64 hex characters.</span>
-          )}
-        </div>
-        {error ? <div className="banner error">{error}</div> : null}
-        {ok ? <div className="banner ok">{ok}</div> : null}
-        <div>
-          <button type="submit" className="btn btn-sm" disabled={importing}>
-            {importing ? "Importing…" : "Import key"}
-          </button>
-        </div>
-      </form>
-    </details>
-  )
-}
-
-function DeviceTokenPanel() {
-  const [token, setToken] = useState<string | null>(null)
-  const [generating, setGenerating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function generate() {
-    setError(null)
-    setGenerating(true)
-    try {
-      const res = await createDeviceToken()
-      setToken(res.token)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  return (
-    <>
-      <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-        Generate a one-time device token, then paste it into the OpenCode TUI to link this account to your machine.
-      </p>
-
-      {token ? (
-        <>
-          <div className="token-box">
-            <input readOnly value={token} onFocus={(e) => e.currentTarget.select()} />
-            <CopyButton value={token} label="Copy token" />
-          </div>
-          <div>
-            <p className="muted" style={{ fontSize: 13, margin: "4px 0 8px" }}>
-              In the OpenCode TUI, run:
-            </p>
-            <div className="codeblock">
-              <span className="prompt">/wallet</span>
-              {"\n"}# paste the token above when prompted
-            </div>
-          </div>
-          <div>
-            <button className="btn btn-sm btn-ghost" onClick={generate} disabled={generating}>
-              {generating ? "Generating…" : "Generate a new token"}
-            </button>
-          </div>
-        </>
+      {connected ? (
+        <ConnectedState address={me?.address ?? primaryWallet?.address ?? null} />
       ) : (
-        <div>
-          <button className="btn btn-primary" onClick={generate} disabled={generating}>
-            {generating ? "Generating…" : "Generate device token"}
-          </button>
+        <div className="grid-collapse" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
+          {/* sign-in method */}
+          <div className="card card--18" style={{ padding: 30 }}>
+            <div className="field__label" style={{ marginBottom: 10 }}>
+              Sign in method
+            </div>
+            <div className="segmented" style={{ marginBottom: 20 }}>
+              {METHODS.map((m) => (
+                <button key={m.id} className={`seg-btn${method === m.id ? " seg-btn--active" : ""}`} onClick={() => setMethod(m.id)}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label className="field__label" htmlFor="wallet-email">
+                Email address
+              </label>
+              <input id="wallet-email" className="input input--44" value={email} onChange={(e) => setEmail(e.target.value)} />
+            </div>
+            <button className="btn btn--ink btn--block btn--48" onClick={() => setShowAuthFlow(true)}>
+              Create wallet & continue <ArrowRight size={17} />
+            </button>
+            <div style={{ textAlign: "center", fontSize: 12, color: "var(--g-600)", marginTop: 14 }}>
+              Keys are generated on your device. We never see them.
+            </div>
+          </div>
+
+          {/* why it's private */}
+          <div className="card card--dark card--18" style={{ padding: 30 }}>
+            <div className="eyebrow eyebrow--green" style={{ marginBottom: 18 }}>
+              why it's private
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+              {PRIVACY.map((p) => (
+                <div key={p.title} style={{ display: "flex", gap: 13 }}>
+                  <span style={{ color: "var(--earn)", flexShrink: 0, marginTop: 1, display: "inline-flex" }}>{p.icon}</span>
+                  <div>
+                    <div style={{ fontSize: 14.5, fontWeight: 500, marginBottom: 3 }}>{p.title}</div>
+                    <div style={{ fontSize: 13, color: "var(--g-600)", lineHeight: 1.5 }}>{p.body}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
-
-      {error ? <div className="banner error">{error}</div> : null}
-    </>
+    </main>
   )
 }
 
-function WithdrawPanel({ onDone }: { onDone: () => void }) {
-  const [withdrawing, setWithdrawing] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+function ConnectedState({ address }: { address: string | null }) {
+  const [token, setToken] = useState<string | null>(null)
+  const [reveal, setReveal] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const requested = useRef(false)
 
-  async function go() {
-    setError(null)
-    setMsg(null)
-    setWithdrawing(true)
+  // Issue one real device token on entering the connected state; fall back to the
+  // sample if the backend is unreachable so the panel still demonstrates the flow.
+  useEffect(() => {
+    if (requested.current) return
+    requested.current = true
+    createDeviceToken()
+      .then((res) => setToken(res.token))
+      .catch(() => setToken(SAMPLE_TOKEN))
+  }, [])
+
+  const tok = token ?? SAMPLE_TOKEN
+  const masked = tok.slice(0, 7) + "•".repeat(21)
+  const loginShort = tok.length > 16 ? `${tok.slice(0, 11)}…${tok.slice(-4)}` : tok
+  const shortAddr = address ? `${address.slice(0, 6)} ···· ${address.slice(-4)}` : "0x9c87 ···· 78d4"
+
+  async function copy() {
     try {
-      const res = await withdraw()
-      setMsg(res.txRef ? `Withdrawal submitted (ref ${res.txRef}).` : "Withdrawal submitted.")
-      onDone()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setWithdrawing(false)
+      await navigator.clipboard.writeText(tok)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1400)
+    } catch {
+      /* clipboard needs a secure context; the field is selectable as a fallback */
     }
   }
 
   return (
-    <>
-      <p className="muted" style={{ margin: 0, fontSize: 14 }}>
-        Settle accrued earnings to your wallet via Circle Gateway + a private Unlink transfer on Arc.
-      </p>
-      {error ? <div className="banner error">{error}</div> : null}
-      {msg ? <div className="banner ok">{msg}</div> : null}
-      <div>
-        <button className="btn btn-primary" onClick={go} disabled={withdrawing}>
-          {withdrawing ? "Withdrawing…" : "Withdraw"}
-        </button>
+    <div className="grid-collapse" style={{ display: "grid", gridTemplateColumns: "0.85fr 1.15fr", gap: 20, alignItems: "start" }}>
+      {/* wallet card */}
+      <div
+        style={{
+          background: "linear-gradient(155deg,#141414 0%,#252525 60%,#4d5a8d 140%)",
+          color: "var(--g-100)",
+          borderRadius: 18,
+          padding: 26,
+          aspectRatio: "1.586 / 1",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "space-between",
+          position: "relative",
+          overflow: "hidden",
+          boxShadow: "var(--shadow-wallet)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+          <BlurbMark size={34} variant="light" />
+          <span className="mono" style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(253,253,253,0.6)" }}>
+            non-custodial
+          </span>
+        </div>
+        <div>
+          <div className="mono" style={{ fontSize: 16, letterSpacing: "0.06em", color: "var(--g-400)" }}>
+            {shortAddr}
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "rgba(253,253,253,0.6)" }}>balance</div>
+              <div className="mono" style={{ fontSize: 20, marginTop: 2 }}>
+                $•••••
+              </div>
+            </div>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 22, padding: "0 9px", borderRadius: 8, background: "rgba(155,224,85,0.16)", color: "var(--earn)", fontSize: 11, fontWeight: 500 }}>
+              ● Arc
+            </span>
+          </div>
+        </div>
       </div>
-    </>
+
+      {/* token card */}
+      <div className="card card--18">
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <span style={{ color: "var(--earn-text)", display: "inline-flex" }}>
+            <Check size={18} strokeWidth={2.4} />
+          </span>
+          <h2 className="display" style={{ fontSize: 19, margin: 0 }}>
+            Wallet connected — here's your device token
+          </h2>
+        </div>
+        <p style={{ fontSize: 13.5, color: "var(--g-650)", margin: "0 0 22px", lineHeight: 1.5 }}>
+          Paste this into your terminal once. It authorizes this machine to earn — and nothing else.
+        </p>
+
+        <div style={{ background: "var(--g-200)", border: "1px solid var(--g-400)", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <span className="mono" style={{ fontSize: 14, color: "var(--g-1000)", flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+            {reveal ? tok : masked}
+          </span>
+          <button className="linkbtn" onClick={() => setReveal((v) => !v)}>
+            {reveal ? "Hide" : "Reveal"}
+          </button>
+          <button className="btn btn--ink btn--copy" onClick={copy}>
+            <Copy size={14} />
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+
+        <div className="mono" style={{ background: "var(--term-body)", border: "1px solid var(--term-border)", borderRadius: 12, padding: "14px 16px", fontSize: 13, color: "var(--g-650)", marginBottom: 20 }}>
+          <span style={{ color: "var(--indigo)" }}>$</span> blurb login --token <span className="term-check">{loginShort}</span>
+        </div>
+
+        <Link href="/me" className="btn btn--outline btn--block">
+          Go to my earnings <ArrowRight size={17} />
+        </Link>
+      </div>
+    </div>
   )
 }

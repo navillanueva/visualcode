@@ -31,6 +31,40 @@ confirmed the round-trip — deposit 0.10 → withdraw 0.05, both `processed`, p
   tarball for Railway (Plan §2 P0b — local resolves only via a symlink); set Railway `visual-api` →
   `SETTLEMENT_MODE=real` (+ `ARC_USDC_DECIMALS=18`, pool token).
 
+## MVP — WHAT'S LEFT (2026-06-13 eve)
+
+**MVP bar = display ALL functionality correctly.** The demo must *show* every screen + the full
+loop working (advertiser funds a campaign → ad renders in the TUI status bar → impressions → dev
+earnings 50% → withdraw). Real on-chain settlement is a **prize bonus, NOT required** for the
+demo — mock is fine for the visible flow.
+
+**In progress — separate agents (do NOT duplicate):**
+- **BlurbCode web redesign** — hi-fi Claude.design spec at
+  `~/Desktop/eth global nyc/design_handoff_blurbcode/` (README = source of truth). VISIBLE redesign
+  only of `visual-web` (tokens/fonts/Header/SVG mark → landing + Terminal-window component →
+  advertise → wallet → NEW `/me` earnings dashboard → responsive). **No functional renames** — keep
+  the `visualcode` provider id, `@visual-code/api`, dirs, env vars; only UI text/wordmark → "BlurbCode".
+  Optional small TUI brand tweak: `packages/tui/src/kickback/status-bar-ad.tsx` ◆ → indigo `›` caret.
+- **v0.4 real-settlement deploy** — flip Railway `visual-api` to real (vendor `@unlink-xyz/sdk`
+  tarball + `SETTLEMENT_MODE=real` + `ARC_USDC_DECIMALS=18` + treasury/pool/payer envs). Bonus.
+
+**Done:** live deploy on `blurbcode.xyz` (custom domain + ALIAS/TXT DNS + `CORS_ORIGIN` + Dynamic
+origin), auth/session **bearer** fix (web↔API are cross-site hosts), vendored `@kickback` for the
+isolated Railway build, P2 contract field fixes (`spendBaseUnits`/`txRef` — spend bar + withdraw
+ref now render).
+
+**Left — for a display-correct demo (priority order):**
+- **P0 — make the loop demoable end-to-end on the live stack.** Blocker: in mock mode
+  `GET /api/treasury` → 503, so `/advertise` can't fund → no ad serves. Fix = either enable real
+  settlement (above) OR add a mock-funding path so a campaign can activate without an on-chain pay.
+  Then run the loop once live (web fund → device token → TUI ad → impressions → earnings → withdraw).
+- **P1 — ad-accounting integrity** (lower priority for a *display* demo): focus/visibility gate so
+  impressions don't accrue while the terminal is backgrounded (`view-tracking.ts:11` TODO);
+  double-count guard (home `AdSlot` + session `StatusBarAd` each run a 5s timer on one store);
+  clicks hardcoded `0` (`app.ts:357` — no endpoint/table) → track or hide from the UI.
+- **P3 — auth hardening** (post-demo): JWT `audience` check; `DYNAMIC_SERVER_API_KEY` is
+  required-but-unused (use or drop); hardcoded Dynamic env-id fallback → require for prod.
+
 ## GOLDEN RULES
 
 1. **NEVER fabricate** chain IDs, RPC URLs, contract addresses, API keys, package names, or SDK

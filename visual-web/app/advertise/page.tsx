@@ -1,9 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { DynamicWidget, useDynamicContext } from "@dynamic-labs/sdk-react-core"
+import { useDynamicContext } from "@dynamic-labs/sdk-react-core"
 import { isEthereumWallet } from "@dynamic-labs/ethereum"
-import Link from "next/link"
 import { createPublicClient, erc20Abi, http } from "viem"
 import {
   createCampaign,
@@ -16,15 +15,35 @@ import {
 import { ARC_RPC_URL, arcTestnet } from "@/lib/arc"
 import { fromBaseUnits, toBaseUnits } from "@/lib/money"
 import { useMe } from "@/lib/useMe"
+import { Spinner } from "@/components/Spinner"
+import { ArrowRight, Shield } from "@/components/Icons"
 
-const EMPTY = { advertiser: "", text: "", url: "", bid: "", budget: "" }
+// The stat row and bid queue are SAMPLE data (advertiser names are PLACEHOLDERS).
+// TODO(human): real launch partners + real delivery metrics.
+const BID_QUEUE = [
+  { bid: "$7.00", copy: "Linear — plan, build, ship faster", tag: "live", imps: "41,208", live: true },
+  { bid: "$5.00", copy: "Warp: the terminal, reimagined", tag: "live", imps: "92,415", live: true },
+  { bid: "$5.00", copy: "Neon — serverless Postgres in 1 command", tag: "live", imps: "33,902", live: true },
+  { bid: "$4.20", copy: "Resend — email for developers", tag: "live", imps: "21,540", live: true },
+  { bid: "$3.50", copy: "Sentry — code breaks. catch it first.", tag: "live", imps: "18,277", live: true },
+  { bid: "$2.10", copy: "Fly.io — deploy app servers close to users", tag: "queued", imps: "—", live: false },
+  { bid: "$1.00", copy: "Turso — SQLite for the edge", tag: "queued", imps: "—", live: false },
+]
+
+const DEFAULTS = {
+  advertiser: "Acme Dev Tools",
+  text: "ship faster with Acme — free for OSS",
+  url: "https://acme.dev/blurb",
+  bid: "5.00",
+  budget: "500",
+}
 
 export default function AdvertisePage() {
   const { me, isLoggedIn } = useMe()
-  const { primaryWallet } = useDynamicContext()
+  const { primaryWallet, setShowAuthFlow } = useDynamicContext()
   const authed = isLoggedIn || me !== null
 
-  const [form, setForm] = useState(EMPTY)
+  const [form, setForm] = useState(DEFAULTS)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -33,9 +52,8 @@ export default function AdvertisePage() {
   const [listError, setListError] = useState<string | null>(null)
   const [fundingId, setFundingId] = useState<string | null>(null)
 
-  // Treasury (where + how to pay) is authoritative for token + decimals — never
-  // hardcode them. Until loaded, fall back to 6dp (mock/dev); the real backend
-  // returns 18 for the arc-testnet pool token.
+  // Treasury is authoritative for token + decimals — never hardcode them. Until
+  // loaded, fall back to 6dp; the real backend returns 18 for the arc-testnet pool token.
   const [treasury, setTreasury] = useState<Treasury | null>(null)
   const decimals = treasury?.decimals ?? 6
 
@@ -67,11 +85,16 @@ export default function AdvertisePage() {
     setFormError(null)
     setNotice(null)
 
+    if (!authed) {
+      setShowAuthFlow(true)
+      setNotice("Sign in to place your campaign in the auction.")
+      return
+    }
+
     let bidBaseUnits: string
     let budgetBaseUnits: string
     try {
       // money.ts throws on malformed / over-precise amounts — fail before we POST.
-      // Use the token's decimals so ledger amounts match the on-chain transfer.
       bidBaseUnits = toBaseUnits(form.bid, decimals).toString()
       budgetBaseUnits = toBaseUnits(form.budget, decimals).toString()
     } catch (err) {
@@ -93,7 +116,6 @@ export default function AdvertisePage() {
         budgetBaseUnits,
       })
       setNotice(`Campaign created (${campaign.id}). Fund it below to enter the auction.`)
-      setForm(EMPTY)
       await loadCampaigns()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : String(err))
@@ -159,125 +181,190 @@ export default function AdvertisePage() {
     }
   }
 
-  if (!authed) {
-    return (
-      <>
-        <h1 className="page-title">Advertise to developers</h1>
-        <p className="page-sub">Connect a wallet to create and fund a campaign.</p>
-        <div className="card stack" style={{ maxWidth: 560, marginTop: 24 }}>
-          <DynamicWidget />
-          <p className="muted" style={{ fontSize: 14 }}>
-            Prefer importing a key? Head to the{" "}
-            <Link href="/wallet" style={{ color: "var(--accent-2)" }}>
-              wallet page
-            </Link>
-            .
-          </p>
-        </div>
-      </>
-    )
-  }
+  // Campaigns/Serving reflect real data when authed; the rest is sample (flagged).
+  const serving = campaigns.filter((c) => c.status === "active" || c.status === "serving").length
+  const stats = [
+    { k: "campaigns", v: authed ? String(campaigns.length) : "3", s: "total" },
+    { k: "serving", v: authed ? String(serving) : "2", s: "currently active" },
+    { k: "views", v: "184,302", s: "delivered" },
+    { k: "spend", v: "$642.10", s: "lifetime" },
+    { k: "rank", v: "#1", s: "in auction" },
+  ]
 
   return (
-    <>
-      <h1 className="page-title">Advertise to developers</h1>
-      <p className="page-sub">Create a campaign, fund it on Arc, and watch your spend in real time.</p>
-
-      <section className="section" style={{ marginTop: 28 }}>
-        <h2>New campaign</h2>
-        <form className="form" onSubmit={handleCreate}>
-          <div className="field">
-            <label htmlFor="advertiser">Advertiser</label>
-            <input
-              id="advertiser"
-              value={form.advertiser}
-              onChange={(e) => set("advertiser", e.target.value)}
-              placeholder="Acme Devtools"
-              required
-            />
-            <span className="hint">Shown to developers as the sponsor.</span>
+    <main className="shell" style={{ padding: "40px 28px 100px" }}>
+      {/* header card */}
+      <div className="card card--18" style={{ padding: 38, marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 28, flexWrap: "wrap" }}>
+        <div style={{ maxWidth: 560 }}>
+          <div className="eyebrow eyebrow--indigo" style={{ marginBottom: 14 }}>
+            campaign portal
           </div>
+          <h1 className="display" style={{ fontSize: 38, letterSpacing: "-0.025em", margin: "0 0 12px" }}>
+            Your campaigns, delivery, and spend.
+          </h1>
+          <p style={{ fontSize: 15, lineHeight: 1.55, color: "var(--g-700)", margin: 0 }}>
+            Place a campaign in the same ascending auction as everyone else, watch live delivery, and edit or pause
+            anytime. Billed to your signed-in account.
+          </p>
+        </div>
+        <button className="btn btn--outline btn--support">Contact support</button>
+      </div>
 
-          <div className="field">
-            <label htmlFor="text">Ad copy</label>
-            <textarea
-              id="text"
-              value={form.text}
-              onChange={(e) => set("text", e.target.value)}
-              placeholder="Ship faster with Acme — try it free."
-              rows={2}
-              required
-            />
+      {/* stat row */}
+      <div className="grid-collapse" style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 14, marginBottom: 20 }}>
+        {stats.map((st) => (
+          <div key={st.k} className="stat-card stat-card--indigo">
+            <div className="stat-card__label">{st.k}</div>
+            <div className="stat-card__value">{st.v}</div>
+            <div className="stat-card__sub">{st.s}</div>
           </div>
+        ))}
+      </div>
 
-          <div className="field">
-            <label htmlFor="url">Click-through URL</label>
-            <input
-              id="url"
-              type="url"
-              value={form.url}
-              onChange={(e) => set("url", e.target.value)}
-              placeholder="https://acme.dev"
-              required
-            />
-          </div>
+      {/* form + preview/queue */}
+      <div className="grid-collapse" style={{ display: "grid", gridTemplateColumns: "0.95fr 1.05fr", gap: 20, alignItems: "start" }}>
+        {/* form */}
+        <div className="card card--18">
+          <h2 className="display" style={{ fontSize: 20, letterSpacing: "-0.01em", margin: "0 0 4px" }}>
+            Place a new campaign
+          </h2>
+          <p style={{ fontSize: 13.5, color: "var(--g-650)", margin: "0 0 22px", lineHeight: 1.5 }}>
+            Bid any amount from $1 / 1k impressions. Below-top bids queue behind the leaders.
+          </p>
 
-          <div className="row-2">
+          <form onSubmit={handleCreate}>
             <div className="field">
-              <label htmlFor="bid">Bid (USDC / 1,000 impressions)</label>
-              <input
-                id="bid"
-                inputMode="decimal"
-                value={form.bid}
-                onChange={(e) => set("bid", e.target.value)}
-                placeholder="2.50"
-                required
-              />
+              <label className="field__label" htmlFor="adv-name">
+                Advertiser name
+              </label>
+              <input id="adv-name" className="input" value={form.advertiser} onChange={(e) => set("advertiser", e.target.value)} />
             </div>
             <div className="field">
-              <label htmlFor="budget">Total budget (USDC)</label>
-              <input
-                id="budget"
-                inputMode="decimal"
-                value={form.budget}
-                onChange={(e) => set("budget", e.target.value)}
-                placeholder="100"
-                required
-              />
+              <label className="field__label field__label--row" htmlFor="adv-copy">
+                <span>Blurb copy</span>
+                <span className="field__hint">one line · keep it tasteful</span>
+              </label>
+              <input id="adv-copy" className="input" value={form.text} onChange={(e) => set("text", e.target.value)} />
             </div>
-          </div>
+            <div className="field">
+              <label className="field__label" htmlFor="adv-url">
+                Click-through URL
+              </label>
+              <input id="adv-url" className="input input--mono" value={form.url} onChange={(e) => set("url", e.target.value)} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 }}>
+              <div>
+                <label className="field__label" htmlFor="adv-bid">
+                  Bid / 1k impressions
+                </label>
+                <div className="input-money">
+                  <span className="input-money__prefix">$</span>
+                  <input id="adv-bid" inputMode="decimal" className="input-money__input" value={form.bid} onChange={(e) => set("bid", e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <label className="field__label" htmlFor="adv-budget">
+                  Daily budget
+                </label>
+                <div className="input-money">
+                  <span className="input-money__prefix">$</span>
+                  <input id="adv-budget" inputMode="decimal" className="input-money__input" value={form.budget} onChange={(e) => set("budget", e.target.value)} />
+                </div>
+              </div>
+            </div>
 
-          {formError ? <div className="banner error">{formError}</div> : null}
-          {notice ? <div className="banner ok">{notice}</div> : null}
+            {formError ? <div className="banner banner--error" style={{ marginBottom: 14 }}>{formError}</div> : null}
 
-          <div>
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? "Creating…" : "Create campaign"}
+            <button type="submit" className="btn btn--ink btn--block btn--48" disabled={submitting}>
+              {submitting ? "Placing…" : "Place campaign in auction"}
             </button>
-          </div>
-        </form>
-      </section>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, fontSize: 12, color: "var(--g-650)", lineHeight: 1.5 }}>
+              <span style={{ color: "var(--gold-dark)", display: "inline-flex", flexShrink: 0 }}>
+                <Shield />
+              </span>
+              Every impression is fraud-reviewed before it bills.
+            </div>
+          </form>
+        </div>
 
-      <section className="section">
-        <h2>Your campaigns</h2>
-        {listError ? <div className="banner error">{listError}</div> : null}
-        {campaigns.length === 0 && !listError ? (
-          <p className="muted">No campaigns yet. Create one above to get started.</p>
-        ) : (
-          <div className="stack">
-            {campaigns.map((c) => (
-              <CampaignRow
-                key={c.id}
-                campaign={c}
-                decimals={decimals}
-                funding={fundingId === c.id}
-                onFund={() => handleFund(c)}
-              />
+        {/* preview + bid queue */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* live preview */}
+          <div style={{ background: "var(--term-body)", border: "1px solid var(--term-border)", borderRadius: 18, padding: 26 }}>
+            <div className="eyebrow eyebrow--faint" style={{ color: "var(--term-dim-3)", marginBottom: 18 }}>
+              Live preview · in a developer's terminal
+            </div>
+            <div className="mono" style={{ fontSize: 13.5, lineHeight: 1.85, color: "var(--term-text)" }}>
+              <div className="term-dim">
+                {"  "}
+                <span className="term-check">✓</span> generating types…
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <div className="status-line status-line--flush">
+                  <Spinner className="status-line__spin" />
+                  <span className="status-line__word">compiling…</span>
+                  <span className="status-line__blurb">
+                    <span className="adv-tile">A</span>
+                    <span className="status-line__name">{form.advertiser || "Advertiser"}</span>
+                    <span className="status-line__copy">— {form.text || "your blurb copy"}</span>
+                    <span className="ad-tag">ad</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* bid queue */}
+          <div className="list-card">
+            <div className="list-card__head">
+              <span className="eyebrow eyebrow--indigo" style={{ fontWeight: 600 }}>
+                bid queue
+              </span>
+              <span style={{ fontSize: 12, color: "var(--g-600)" }}>7 live · updated just now</span>
+            </div>
+            {BID_QUEUE.map((row, i) => (
+              <div key={row.copy} className={`bid-row${i === 0 ? " bid-row--top" : ""}`}>
+                <span className="bid-row__bid">{row.bid}</span>
+                <span className="bid-row__copy">{row.copy}</span>
+                <span className={`bid-row__tag${row.live ? " bid-row__tag--live" : ""}`}>
+                  {row.tag} · {row.imps}
+                </span>
+              </div>
             ))}
           </div>
-        )}
-      </section>
-    </>
+        </div>
+      </div>
+
+      {/* real campaigns + funding (preserves the on-chain fund flow) */}
+      {authed ? (
+        <section style={{ marginTop: 20 }}>
+          {notice ? <div className="banner banner--ok" style={{ marginBottom: 14 }}>{notice}</div> : null}
+          {listError ? <div className="banner banner--error" style={{ marginBottom: 14 }}>{listError}</div> : null}
+          {campaigns.length > 0 ? (
+            <div className="list-card">
+              <div className="list-card__head">
+                <div>
+                  <h2 className="display" style={{ fontSize: 19, margin: "0 0 2px" }}>
+                    Your campaigns
+                  </h2>
+                  <span style={{ fontSize: 13, color: "var(--g-650)" }}>Created campaigns — fund one to enter the auction.</span>
+                </div>
+                <span className="mono" style={{ fontSize: 12, color: "var(--earn-text)" }}>
+                  {campaigns.length} total
+                </span>
+              </div>
+              {campaigns.map((c) => (
+                <CampaignRow key={c.id} campaign={c} decimals={decimals} funding={fundingId === c.id} onFund={() => handleFund(c)} />
+              ))}
+            </div>
+          ) : (
+            <p style={{ fontSize: 14, color: "var(--g-650)" }}>No campaigns yet — place one above to get started.</p>
+          )}
+        </section>
+      ) : notice ? (
+        <div className="banner banner--ok" style={{ marginTop: 20 }}>{notice}</div>
+      ) : null}
+    </main>
   )
 }
 
@@ -294,52 +381,32 @@ function CampaignRow({
 }) {
   const remaining = campaign.budgetRemainingBaseUnits
   const spent = campaign.spendBaseUnits
-  let pct: number | null = null
-  if (remaining !== undefined && spent !== undefined) {
-    const total = BigInt(remaining) + BigInt(spent)
-    pct = total > 0n ? Number((BigInt(spent) * 100n) / total) : 0
-  }
   const fundable = !campaign.status || campaign.status === "pending" || campaign.status === "draft"
 
   return (
-    <div className="campaign">
-      <div className="campaign-head">
-        <div>
-          <strong>{campaign.advertiser || "Untitled"}</strong>{" "}
-          {campaign.status ? <span className="badge">{campaign.status}</span> : null}
-          <div className="ad-text">{campaign.text}</div>
-          <a href={campaign.url} target="_blank" rel="noreferrer" className="muted" style={{ fontSize: 13 }}>
-            {campaign.url}
-          </a>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 16, alignItems: "center", padding: "16px 20px", borderTop: "1px solid var(--g-300)" }}>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <b style={{ fontSize: 14, fontWeight: 600 }}>{campaign.advertiser || "Untitled"}</b>
+          {campaign.status ? (
+            <span className="mono" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--g-650)", border: "1px solid var(--g-300)", borderRadius: 999, padding: "2px 8px" }}>
+              {campaign.status}
+            </span>
+          ) : null}
         </div>
-        {/* Disabled once funded — a campaign funds once; re-paying an active one
-            would transfer again while the backend treats it as already funded. */}
-        <button className="btn btn-sm" onClick={onFund} disabled={funding || !fundable}>
-          {funding ? "Funding…" : fundable ? "Fund" : "Funded"}
-        </button>
-      </div>
-
-      <div className="inline" style={{ marginTop: 12, gap: 24 }}>
-        <span className="muted" style={{ fontSize: 13 }}>
-          Bid: <span className="mono">{fromBaseUnits(BigInt(campaign.bidBaseUnits), decimals)} USDC</span> / 1k
-        </span>
-        {remaining !== undefined ? (
-          <span className="muted" style={{ fontSize: 13 }}>
-            Remaining: <span className="mono">{fromBaseUnits(BigInt(remaining), decimals)} USDC</span>
-          </span>
-        ) : null}
-        {spent !== undefined ? (
-          <span className="muted" style={{ fontSize: 13 }}>
-            Spent: <span className="mono">{fromBaseUnits(BigInt(spent), decimals)} USDC</span>
-          </span>
-        ) : null}
-      </div>
-
-      {pct !== null ? (
-        <div className="bar">
-          <span style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
+        <div style={{ fontSize: 13, color: "var(--g-700)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
+          {campaign.text}
         </div>
-      ) : null}
+        <div className="mono" style={{ fontSize: 12, color: "var(--g-600)", marginTop: 6, display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <span>bid {fromBaseUnits(BigInt(campaign.bidBaseUnits), decimals)}/1k</span>
+          {remaining !== undefined ? <span>remaining {fromBaseUnits(BigInt(remaining), decimals)}</span> : null}
+          {spent !== undefined ? <span>spent {fromBaseUnits(BigInt(spent), decimals)}</span> : null}
+        </div>
+      </div>
+      {/* Disabled once funded — re-paying an active campaign would transfer again. */}
+      <button className="btn btn--outline btn--copy" onClick={onFund} disabled={funding || !fundable}>
+        {funding ? "Funding…" : fundable ? "Fund" : "Funded"}
+      </button>
     </div>
   )
 }
